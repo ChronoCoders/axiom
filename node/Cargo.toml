@@ -1,0 +1,38 @@
+[package]
+name = "axiom-node"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axiom-api = { path = "../api" }
+axiom-consensus = { path = "../consensus" }
+axiom-execution = { path = "../execution" }
+axiom-network = { path = "../network" }
+axiom-mempool = { path = "../mempool" }
+axiom-crypto = { path = "../crypto" }
+axiom-primitives = { path = "../primitives" }
+axiom-state = { path = "../state" }
+axiom-storage = { path = "../storage" }
+axum = "0.7"
+clap = { version = "4.5.57", features = ["derive"] }
+config = { version = "0.15.19", features = ["toml"] }
+chrono = "0.4"
+dotenvy = "0.15"
+hex = "0.4.3"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+sha2 = "0.10.9"
+ed25519-dalek = "2.1.1"
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+rustls = { version = "0.23", features = ["ring"] }
+
+[dev-dependencies]
+axiom-execution = { path = "../execution" }
+temp-env = "0.3"
+rcgen = "0.13"
+reqwest = { version = "0.12", features = ["rustls-tls", "blocking", "json"] }
+tempfile = "3"
+rusqlite = { version = "0.31", features = ["bundled"] }

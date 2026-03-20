@@ -1,0 +1,16 @@
+[package]
+name = "test-vector-gen"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "test-vector-gen"
+path = "src/main.rs"
+
+[dependencies]
+axiom-primitives = { path = "../../primitives" }
+axiom-crypto = { path = "../../crypto" }
+axiom-state = { path = "../../state" }
+axiom-execution = { path = "../../execution" }
+serde_json = "1"
+hex = "0.4"

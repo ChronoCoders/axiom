@@ -1,0 +1,13 @@
+[package]
+name = "axiom-consensus"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axiom-primitives = { path = "../primitives" }
+axiom-state = { path = "../state" }
+axiom-execution = { path = "../execution" }
+tracing = "0.1"
+axiom-crypto = { version = "0.1.0", path = "../crypto" }
+thiserror = "2.0.18"
+serde_json = "1.0"

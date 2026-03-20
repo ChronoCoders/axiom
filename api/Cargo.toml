@@ -1,0 +1,28 @@
+[package]
+name = "axiom-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axiom-state = { path = "../state" }
+axiom-storage = { path = "../storage" }
+axiom-primitives = { path = "../primitives" }
+axiom-mempool = { path = "../mempool" }
+axiom-network = { path = "../network" }
+axiom-crypto = { path = "../crypto" }
+axum = "0.7"
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+tower = { version = "0.4", features = ["limit", "timeout", "util", "buffer", "load-shed"] }
+tower-http = { version = "0.5", features = ["fs", "trace", "timeout"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["test-util", "macros"] }
+tempfile = "3.3"
+http-body-util = "0.1"
+hyper = "1.0"
+

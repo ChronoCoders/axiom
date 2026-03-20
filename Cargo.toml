@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "primitives",
+    "crypto",
+    "state",
+    "execution",
+    "consensus",
+    "mempool",
+    "storage",
+    "network",
+    "api",
+    "node",
+    "tools/genesis-tool",
+    "tools/test-vector-gen",
+]
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1

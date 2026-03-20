@@ -1,0 +1,12 @@
+[package]
+name = "axiom-crypto"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axiom-primitives = { path = "../primitives" }
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+sha2 = "0.10"
+rand = "0.8"
+subtle = "2.5"
+thiserror = "2.0.18"

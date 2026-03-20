@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AXIOM &bull; Blocks</title>
+  <link rel="stylesheet" href="styles.css"/>
+</head>
+<body class="page-enter">
+  <header class="topbar">
+    <div class="brand">AXIOM <span class="pulse-dot" id="livePulse" title="Chain active"></span></div>
+    <nav class="nav">
+      <a href="index.html">Overview</a>
+      <a href="blocks.html" class="active">Blocks</a>
+      <a href="accounts.html">Accounts</a>
+      <a href="validators.html">Validators</a>
+    </nav>
+    <div class="search-wrapper">
+      <input type="text" id="globalSearch" class="search-input" placeholder="Search block height, hash, or account..." />
+      <div class="search-results" id="searchResults"></div>
+    </div>
+    <div class="meta"></div>
+    <button class="logout-btn" onclick="logout()">Logout</button>
+  </header>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">Blocks</h2>
+      <div class="grid">
+        <div>
+          <label>Limit</label>
+          <input id="limitInput" type="number" min="1" max="1000" value="50"/>
+        </div>
+        <div>
+          <label>Cursor (height)</label>
+          <input id="cursorInput" type="text" placeholder="start from height"/>
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <button id="loadBtn">Load</button>
+        </div>
+      </div>
+      <div id="blocksError" class="text-muted" style="margin-top:12px;"></div>
+      <div class="table-scroll">
+        <table style="margin-top:14px;">
+          <thead>
+            <tr>
+              <th>Height</th>
+              <th>Hash</th>
+              <th>Proposer</th>
+              <th>Txs</th>
+              <th>Time</th>
+              <th>State Hash</th>
+            </tr>
+          </thead>
+          <tbody id="blocksTable"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">AXIOM Console &middot; Read-only</footer>
+  <div class="tooltip" id="tooltip"></div>
+  <script src="app.js"></script>
+</body>
+</html>

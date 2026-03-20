@@ -1,0 +1,12 @@
+[package]
+name = "axiom-state"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axiom-primitives = { path = "../primitives" }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0.18"
+
+[dev-dependencies]
+serde_json = "1.0"

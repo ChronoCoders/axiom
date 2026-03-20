@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AXIOM Console</title>
+  <link rel="stylesheet" href="styles.css"/>
+</head>
+<body class="page-enter">
+  <header class="topbar">
+    <div class="brand">AXIOM <span class="pulse-dot" id="livePulse" title="Chain active"></span></div>
+    <nav class="nav">
+      <a href="index.html" class="active">Overview</a>
+      <a href="blocks.html">Blocks</a>
+      <a href="accounts.html">Accounts</a>
+      <a href="validators.html">Validators</a>
+    </nav>
+    <div class="search-wrapper">
+      <input type="text" id="globalSearch" class="search-input" placeholder="Search block height, hash, or account..." />
+      <div class="search-results" id="searchResults"></div>
+    </div>
+    <button class="logout-btn" onclick="logout()">Logout</button>
+  </header>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">Network</h2>
+      <div class="grid">
+        <div><label>Genesis Hash</label><span class="value mono truncate" id="genesisHash"><span class="skeleton"></span></span></div>
+        <div><label>Height</label><span class="value mono" id="height"><span class="skeleton"></span></span></div>
+        <div><label>Validators</label><span class="value mono" id="validatorCount"><span class="skeleton"></span></span></div>
+        <div><label>Syncing</label><span class="value mono" id="syncing"><span class="skeleton"></span></span></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Latest Block</h2>
+      <div class="grid">
+        <div><label>Hash</label><span class="value mono truncate" id="latestHash"><span class="skeleton"></span></span></div>
+        <div><label>State Hash</label><span class="value mono truncate" id="latestStateHash"><span class="skeleton"></span></span></div>
+        <div><label>Proposer</label><span class="value mono truncate" id="latestProposer"><span class="skeleton"></span></span></div>
+        <div><label>Transactions</label><span class="value mono" id="latestTxCount"><span class="skeleton sk-sm"></span></span></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Block Activity</h2>
+      <div class="grid">
+        <div><label>Tx / Block (last 20)</label><div id="sparkTx" class="sparkline-container"></div></div>
+        <div><label>Blocks / Interval</label><div id="sparkTime" class="sparkline-container"></div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Peers</h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Address</th>
+              <th>Connected Since</th>
+            </tr>
+          </thead>
+          <tbody id="peersTable"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Validators</h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Power</th>
+              <th>Account</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="validatorsTable"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Health</h2>
+      <div class="grid">
+        <div><label>Liveness</label><span class="value" id="healthLive"><span class="status-dot"></span><span class="health-text">-</span></span></div>
+        <div><label>Readiness</label><span class="value" id="healthReady"><span class="status-dot"></span><span class="health-text">-</span></span></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">AXIOM Console &middot; Read-only</footer>
+  <div class="tooltip" id="tooltip"></div>
+  <script src="app.js"></script>
+</body>
+</html>

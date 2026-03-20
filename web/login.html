@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AXIOM &bull; Access Console</title>
+  <link rel="stylesheet" href="styles.css"/>
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background-color: #08090d;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+    .login-card {
+      background: #0f1219;
+      border: 1px solid #1a1e2a;
+      border-radius: 8px;
+      padding: 48px 44px 40px;
+      width: 100%;
+      max-width: 420px;
+      animation: fadeUp 0.4s ease both;
+    }
+    .login-brand {
+      font-family: var(--font-mono);
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      color: var(--text);
+      text-align: center;
+      margin-bottom: 6px;
+    }
+    .login-subtitle {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.16em;
+      color: var(--muted);
+      text-align: center;
+      text-transform: uppercase;
+      margin-bottom: 36px;
+    }
+    .login-label {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .login-input {
+      width: 100%;
+      padding: 12px 14px;
+      background: #1a1e2a;
+      border: 1px solid #2a2f3e;
+      border-radius: 4px;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 150ms ease, box-shadow 150ms ease;
+      margin-bottom: 22px;
+      box-sizing: border-box;
+    }
+    .login-input::placeholder {
+      color: #4a4f5e;
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.06em;
+    }
+    .login-input:focus {
+      border-color: #3a3f5e;
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.08);
+    }
+    .login-btn {
+      width: 100%;
+      padding: 13px 0;
+      background: #e4e6eb;
+      border: none;
+      border-radius: 4px;
+      color: #08090d;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 150ms ease, transform 80ms ease;
+      margin-top: 8px;
+    }
+    .login-btn:hover {
+      background: #fff;
+    }
+    .login-btn:active {
+      transform: scale(0.98);
+    }
+    .login-error {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--danger);
+      text-align: center;
+      margin-top: 14px;
+      min-height: 16px;
+    }
+    .login-footer {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      color: #3a3f4e;
+      text-align: center;
+      margin-top: 32px;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="login-brand">AXIOM</div>
+    <div class="login-subtitle">Restricted Access Console</div>
+    <form id="loginForm" autocomplete="off">
+      <label class="login-label">Identity</label>
+      <input class="login-input" type="text" id="username" placeholder="Username" autocomplete="off" required />
+      <label class="login-label">Key</label>
+      <input class="login-input" type="password" id="password" placeholder="Password" autocomplete="off" required />
+      <button class="login-btn" type="submit">Authenticate</button>
+      <div class="login-error" id="loginError"></div>
+    </form>
+  </div>
+  <div class="login-footer">System v2.1.4 &mdash; Secure Connection</div>
+  <script>
+    document.getElementById("loginForm").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var user = document.getElementById("username").value.trim();
+      var pass = document.getElementById("password").value;
+      var errEl = document.getElementById("loginError");
+      errEl.textContent = "";
+
+      fetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: user, password: pass })
+      }).then(function (res) {
+        return res.json().then(function (data) {
+          if (res.ok && data.token) {
+            sessionStorage.setItem("axiom_token", data.token);
+            window.location.href = "index.html";
+          } else {
+            errEl.textContent = data.error || "Access denied";
+          }
+        });
+      }).catch(function () {
+        errEl.textContent = "Connection failed";
+      });
+    });
+
+    if (sessionStorage.getItem("axiom_token")) {
+      window.location.href = "index.html";
+    }
+  </script>
+</body>
+</html>

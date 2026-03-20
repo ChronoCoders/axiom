@@ -1,0 +1,16 @@
+[Unit]
+Description=AXIOM Node
+After=network.target
+
+[Service]
+User=axiom
+Group=axiom
+WorkingDirectory=/var/lib/axiom
+ExecStart=/usr/local/bin/axiom-node --config /etc/axiom/axiom.toml
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target

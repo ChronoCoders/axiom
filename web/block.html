@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AXIOM &bull; Block</title>
+  <link rel="stylesheet" href="styles.css"/>
+</head>
+<body class="page-enter">
+  <header class="topbar">
+    <div class="brand">AXIOM <span class="pulse-dot" id="livePulse" title="Chain active"></span></div>
+    <nav class="nav">
+      <a href="index.html">Overview</a>
+      <a href="blocks.html" class="active">Blocks</a>
+      <a href="accounts.html">Accounts</a>
+      <a href="validators.html">Validators</a>
+    </nav>
+    <div class="search-wrapper">
+      <input type="text" id="globalSearch" class="search-input" placeholder="Search block height, hash, or account..." />
+      <div class="search-results" id="searchResults"></div>
+    </div>
+    <div class="meta"></div>
+    <button class="logout-btn" onclick="logout()">Logout</button>
+  </header>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">Block</h2>
+      <div id="blockError" class="text-muted"></div>
+      <div class="grid">
+        <div><label>Height</label><span class="value mono" id="blkHeight"><span class="skeleton sk-sm"></span></span></div>
+        <div><label>Epoch</label><span class="value mono" id="blkEpoch"><span class="skeleton sk-sm"></span></span></div>
+        <div>
+          <label>Block Hash</label>
+          <span class="value mono truncate" id="blkHash"><span class="skeleton"></span></span>
+          <span class="copy-link" id="copyHash">copy</span>
+        </div>
+        <div><label>Parent Hash</label><span class="value mono truncate" id="parentHash"><span class="skeleton"></span></span></div>
+        <div><label>Proposer</label><span class="value mono truncate" id="blkProposer"><span class="skeleton"></span></span></div>
+        <div><label>State Hash</label><span class="value mono truncate" id="stateHash"><span class="skeleton"></span></span></div>
+        <div><label>Timestamp</label><span class="value mono" id="blkTimestamp"><span class="skeleton"></span></span></div>
+      </div>
+      <div class="block-nav">
+        <a id="prevBlock" href="#">&larr; Previous</a>
+        <a id="nextBlock" href="#">Next &rarr;</a>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Transactions <span class="text-secondary" id="txCount">0</span></h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Sender</th>
+              <th>Recipient</th>
+              <th>Amount</th>
+              <th>Nonce</th>
+            </tr>
+          </thead>
+          <tbody id="txTable"></tbody>
+        </table>
+      </div>
+      <div id="txEmpty" class="empty" style="display:none;">No transactions in this block</div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Signatures</h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Validator</th>
+              <th>Signature</th>
+            </tr>
+          </thead>
+          <tbody id="sigTable"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">AXIOM Console &middot; Read-only</footer>
+  <div class="tooltip" id="tooltip"></div>
+  <script src="app.js"></script>
+</body>
+</html>
