@@ -3,7 +3,7 @@ use axiom_primitives::{
     ValidatorId, MIN_VALIDATOR_STAKE, UNBONDING_PERIOD,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 // -----------------------------------------------------------------------------
@@ -44,6 +44,12 @@ pub struct StakingState {
     pub minimum_stake: u64,
     pub unbonding_period: u64,
     pub unbonding_queue: Vec<UnbondingEntry>,
+    #[serde(default)]
+    pub epoch: u64,
+    #[serde(default)]
+    pub jailed_validators: BTreeSet<ValidatorId>,
+    #[serde(default)]
+    pub processed_evidence: BTreeSet<[u8; 32]>,
 }
 
 impl StakingState {
@@ -54,6 +60,9 @@ impl StakingState {
             minimum_stake: 0,
             unbonding_period: 0,
             unbonding_queue: Vec::new(),
+            epoch: 0,
+            jailed_validators: BTreeSet::new(),
+            processed_evidence: BTreeSet::new(),
         }
     }
 
@@ -64,17 +73,25 @@ impl StakingState {
             minimum_stake: MIN_VALIDATOR_STAKE,
             unbonding_period: UNBONDING_PERIOD,
             unbonding_queue: Vec::new(),
+            epoch: 0,
+            jailed_validators: BTreeSet::new(),
+            processed_evidence: BTreeSet::new(),
         }
     }
 
     /// Returns true if the staking state has no data (v1 default).
     pub fn is_empty(&self) -> bool {
-        self.stakes.is_empty() && self.unbonding_queue.is_empty()
+        self.stakes.is_empty()
+            && self.unbonding_queue.is_empty()
+            && self.epoch == 0
+            && self.jailed_validators.is_empty()
+            && self.processed_evidence.is_empty()
     }
 
     pub fn serialize_staking_canonical(&self) -> Vec<u8> {
         let mut buf = Vec::new();
 
+        serialize_u64(self.epoch, &mut buf);
         serialize_u64(self.minimum_stake, &mut buf);
         serialize_u64(self.unbonding_period, &mut buf);
 
@@ -91,6 +108,18 @@ impl StakingState {
             serialize_string(&to_hex(&entry.validator_id.0), &mut buf);
             serialize_u64(entry.amount.0, &mut buf);
             serialize_u64(entry.release_height, &mut buf);
+        }
+
+        let jailed_len = self.jailed_validators.len() as u32;
+        buf.extend_from_slice(&jailed_len.to_be_bytes());
+        for vid in &self.jailed_validators {
+            serialize_string(&to_hex(&vid.0), &mut buf);
+        }
+
+        let processed_len = self.processed_evidence.len() as u32;
+        buf.extend_from_slice(&processed_len.to_be_bytes());
+        for h in &self.processed_evidence {
+            serialize_string(&to_hex(h), &mut buf);
         }
 
         buf

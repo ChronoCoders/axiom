@@ -1,11 +1,12 @@
 use axiom_crypto::{
     compute_block_hash, sha256, verify_transaction_signature, verify_transaction_signature_for_height,
-    verify_precommit, verify_vote, CryptoError,
+    verify_consensus_vote, verify_precommit, verify_proposal, verify_vote, CryptoError,
 };
 use axiom_primitives::{
-    serialize_block_canonical, AccountId, Block, BlockHash, ProtocolVersion, StakeAmount, StateHash,
-    Transaction, TransactionType, ValidatorId, MAX_BLOCK_SIZE_BYTES, MAX_TRANSACTIONS_PER_BLOCK,
-    V2_ACTIVATION_HEIGHT, V2_MIGRATION_STAKE_PER_VALIDATOR,
+    serialize_block_canonical, serialize_evidence_canonical, AccountId, Block, BlockHash, Evidence,
+    ProtocolVersion, StakeAmount, StateHash, Transaction, TransactionType, ValidatorId,
+    MAX_BLOCK_SIZE_BYTES, MAX_TRANSACTIONS_PER_BLOCK, SLASH_PERCENTAGE, V2_ACTIVATION_HEIGHT,
+    V2_MIGRATION_STAKE_PER_VALIDATOR,
 };
 use axiom_state::{verify_staking_invariants, Account, StakingState, State, StateError};
 use std::collections::HashSet;
@@ -96,8 +97,20 @@ pub enum ExecutionError {
         height: u64,
     },
 
-    #[error("SlashEvidence transactions are not implemented in Phase 2")]
-    SlashEvidenceNotImplemented,
+    #[error("SlashEvidence transaction missing evidence payload")]
+    MissingEvidence,
+
+    #[error("SlashEvidence transaction must have amount 0 (got {got})")]
+    InvalidEvidenceAmount { got: u64 },
+
+    #[error("Evidence refers to future height {evidence_height} (current {current_height})")]
+    EvidenceFromFuture {
+        evidence_height: u64,
+        current_height: u64,
+    },
+
+    #[error("Invalid slashing evidence")]
+    InvalidEvidence,
 
     #[error("Sender {sender} is not a registered validator account")]
     NotValidatorAccount { sender: AccountId },
@@ -348,9 +361,14 @@ fn apply_block_v2_inner(
         });
     }
 
-    if block.epoch != 0 {
+    let expected_epoch = if block.height == V2_ACTIVATION_HEIGHT && staking_state.is_empty() {
+        0
+    } else {
+        staking_state.epoch
+    };
+    if block.epoch != expected_epoch {
         return Err(ExecutionError::InvalidEpoch {
-            expected: 0,
+            expected: expected_epoch,
             got: block.epoch,
         });
     }
@@ -368,6 +386,7 @@ fn apply_block_v2_inner(
 
     let mut new_state = previous_state.clone();
     let mut new_staking = staking_state.clone();
+    let before_active_set = active_validator_set(previous_state);
 
     if block.height == V2_ACTIVATION_HEIGHT {
         if new_staking.is_empty() {
@@ -399,9 +418,15 @@ fn apply_block_v2_inner(
                 apply_unstake_transaction(&mut new_state, &mut new_staking, tx, block.height)?;
             }
             TransactionType::SlashEvidence => {
-                return Err(ExecutionError::SlashEvidenceNotImplemented);
+                validate_slash_evidence_transaction(&new_state, tx, block.height)?;
+                apply_slash_evidence_transaction(&mut new_state, &mut new_staking, tx, block.height)?;
             }
         }
+    }
+
+    let after_active_set = active_validator_set(&new_state);
+    if after_active_set != before_active_set {
+        new_staking.epoch = new_staking.epoch.checked_add(1).ok_or(ExecutionError::Overflow)?;
     }
 
     let proposer_account = new_state
@@ -451,6 +476,7 @@ pub fn execute_proposal_v2(
         ProtocolVersion::V2 => {
             let mut new_state = state.clone();
             let mut new_staking = staking_state.clone();
+            let before_active_set = active_validator_set(state);
 
             if height == V2_ACTIVATION_HEIGHT {
                 if new_staking.is_empty() {
@@ -487,9 +513,20 @@ pub fn execute_proposal_v2(
                         )?;
                     }
                     TransactionType::SlashEvidence => {
-                        return Err(ExecutionError::SlashEvidenceNotImplemented);
+                        validate_slash_evidence_transaction(&new_state, tx, height)?;
+                        apply_slash_evidence_transaction(
+                            &mut new_state,
+                            &mut new_staking,
+                            tx,
+                            height,
+                        )?;
                     }
                 }
+            }
+
+            let after_active_set = active_validator_set(&new_state);
+            if after_active_set != before_active_set {
+                new_staking.epoch = new_staking.epoch.checked_add(1).ok_or(ExecutionError::Overflow)?;
             }
 
             let proposer_account = new_state
@@ -560,7 +597,8 @@ fn apply_v1_to_v2_migration(
 
         if let Some(val) = state.validators.get_mut(&vid) {
             let staked = staking.stakes.get(&vid).map(|a| a.0).unwrap_or(0);
-            val.active = staked >= staking.minimum_stake;
+            val.active =
+                staked >= staking.minimum_stake && !staking.jailed_validators.contains(&vid);
         }
     }
 
@@ -636,7 +674,7 @@ fn apply_stake_transaction(
 
     if let Some(val) = state.validators.get_mut(&vid) {
         let staked = staking.stakes.get(&vid).map(|a| a.0).unwrap_or(0);
-        val.active = staked >= staking.minimum_stake;
+        val.active = staked >= staking.minimum_stake && !staking.jailed_validators.contains(&vid);
     }
 
     Ok(())
@@ -707,15 +745,166 @@ fn apply_unstake_transaction(
 
     if let Some(val) = state.validators.get_mut(&vid) {
         let staked = staking.stakes.get(&vid).map(|a| a.0).unwrap_or(0);
-        val.active = staked >= staking.minimum_stake;
+        val.active = staked >= staking.minimum_stake && !staking.jailed_validators.contains(&vid);
     }
 
+    Ok(())
+}
+
+fn validate_slash_evidence_transaction(
+    state: &State,
+    tx: &Transaction,
+    current_height: u64,
+) -> Result<(), ExecutionError> {
+    verify_transaction_signature_for_height(current_height, tx).map_err(ExecutionError::CryptoError)?;
+
+    let sender_acc = state
+        .get_account(&tx.sender)
+        .ok_or(ExecutionError::SenderNotFound { sender: tx.sender })?;
+
+    if tx.nonce != sender_acc.nonce {
+        return Err(ExecutionError::InvalidNonce {
+            expected: sender_acc.nonce,
+            got: tx.nonce,
+        });
+    }
+
+    if tx.amount != 0 {
+        return Err(ExecutionError::InvalidEvidenceAmount { got: tx.amount });
+    }
+
+    let evidence = tx.evidence.as_ref().ok_or(ExecutionError::MissingEvidence)?;
+    let evidence_height = match evidence {
+        Evidence::DoublePropose { proposal_a, .. } => proposal_a.height,
+        Evidence::DoubleVote { vote_a, .. } => vote_a.height,
+    };
+
+    if evidence_height > current_height {
+        return Err(ExecutionError::EvidenceFromFuture {
+            evidence_height,
+            current_height,
+        });
+    }
+
+    if evidence_height < V2_ACTIVATION_HEIGHT {
+        return Err(ExecutionError::InvalidEvidence);
+    }
+
+    match evidence {
+        Evidence::DoubleVote { vote_a, vote_b } => {
+            verify_consensus_vote(vote_a).map_err(ExecutionError::CryptoError)?;
+            verify_consensus_vote(vote_b).map_err(ExecutionError::CryptoError)?;
+
+            if vote_a.validator_id != vote_b.validator_id
+                || vote_a.height != vote_b.height
+                || vote_a.round != vote_b.round
+                || vote_a.phase != vote_b.phase
+                || vote_a.block_hash == vote_b.block_hash
+            {
+                return Err(ExecutionError::InvalidEvidence);
+            }
+
+            let _ = state
+                .get_validator(&vote_a.validator_id)
+                .ok_or(ExecutionError::UnknownValidator {
+                    id: vote_a.validator_id,
+                })?;
+        }
+        Evidence::DoublePropose {
+            proposal_a,
+            proposal_b,
+        } => {
+            verify_proposal(proposal_a).map_err(ExecutionError::CryptoError)?;
+            verify_proposal(proposal_b).map_err(ExecutionError::CryptoError)?;
+
+            let hash_a = compute_block_hash(&proposal_a.block);
+            let hash_b = compute_block_hash(&proposal_b.block);
+            if proposal_a.proposer_id != proposal_b.proposer_id
+                || proposal_a.height != proposal_b.height
+                || proposal_a.round != proposal_b.round
+                || hash_a == hash_b
+            {
+                return Err(ExecutionError::InvalidEvidence);
+            }
+
+            let _ = state
+                .get_validator(&proposal_a.proposer_id)
+                .ok_or(ExecutionError::UnknownValidator {
+                    id: proposal_a.proposer_id,
+                })?;
+        }
+    }
+
+    Ok(())
+}
+
+fn apply_slash_evidence_transaction(
+    state: &mut State,
+    staking: &mut StakingState,
+    tx: &Transaction,
+    current_height: u64,
+) -> Result<(), ExecutionError> {
+    let sender = state
+        .get_account_mut(&tx.sender)
+        .ok_or(ExecutionError::SenderNotFound { sender: tx.sender })?;
+    sender.nonce = sender
+        .nonce
+        .checked_add(1)
+        .ok_or(ExecutionError::Overflow)?;
+
+    let evidence = tx.evidence.as_ref().ok_or(ExecutionError::MissingEvidence)?;
+
+    let mut h = [0u8; 32];
+    h.copy_from_slice(&sha256(&serialize_evidence_canonical(evidence)));
+
+    if !staking.processed_evidence.insert(h) {
+        return Ok(());
+    }
+
+    let offender = match evidence {
+        Evidence::DoubleVote { vote_a, .. } => vote_a.validator_id,
+        Evidence::DoublePropose { proposal_a, .. } => proposal_a.proposer_id,
+    };
+
+    let current_stake = staking.stakes.get(&offender).map(|a| a.0).unwrap_or(0);
+    let slash_amount = (current_stake as u128)
+        .checked_mul(SLASH_PERCENTAGE as u128)
+        .ok_or(ExecutionError::Overflow)?
+        .checked_div(100)
+        .ok_or(ExecutionError::Overflow)? as u64;
+
+    if slash_amount > 0 {
+        let new_stake = current_stake
+            .checked_sub(slash_amount)
+            .ok_or(ExecutionError::Underflow)?;
+        staking.stakes.insert(offender, StakeAmount(new_stake));
+        state.total_supply = state
+            .total_supply
+            .checked_sub(slash_amount)
+            .ok_or(ExecutionError::Underflow)?;
+    }
+
+    staking.jailed_validators.insert(offender);
+
+    if let Some(val) = state.validators.get_mut(&offender) {
+        val.active = false;
+    }
+
+    let _ = current_height;
     Ok(())
 }
 
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
+
+fn active_validator_set(state: &State) -> HashSet<ValidatorId> {
+    state
+        .validators
+        .iter()
+        .filter_map(|(id, v)| if v.active { Some(*id) } else { None })
+        .collect()
+}
 
 pub fn select_proposer(state: &State, height: u64) -> Result<ValidatorId, ExecutionError> {
     let active = state.active_validators();
@@ -1131,6 +1320,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]), // Placeholder
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let mut signed_tx = tx.clone();
         signed_tx.signature = axiom_crypto::sign_transaction(&sk, &tx);
@@ -1192,6 +1382,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let mut signed_tx = tx.clone();
         signed_tx.signature = axiom_crypto::sign_transaction(&wrong_sk, &tx); // Wrong key!
@@ -1227,6 +1418,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let mut signed_tx = tx.clone();
         signed_tx.signature = axiom_crypto::sign_transaction(&sk, &tx);
@@ -1264,6 +1456,7 @@ mod tests {
             nonce: 1, // Invalid, expected 0
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let mut signed_tx = tx.clone();
         signed_tx.signature = axiom_crypto::sign_transaction(&sk, &tx);
@@ -1298,6 +1491,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let mut signed_tx = tx.clone();
         signed_tx.signature = axiom_crypto::sign_transaction(&sk, &tx);
@@ -1388,6 +1582,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let transactions = vec![tx; MAX_TRANSACTIONS_PER_BLOCK + 1];
 
@@ -1429,6 +1624,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let mut signed_tx = tx.clone();
         signed_tx.signature = axiom_crypto::sign_transaction(&sk, &tx);
@@ -1531,6 +1727,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let mut signed_tx1 = tx1.clone();
         signed_tx1.signature = axiom_crypto::sign_transaction(&sk, &tx1);
@@ -1543,6 +1740,7 @@ mod tests {
             nonce: 1,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let mut signed_tx2 = tx2.clone();
         signed_tx2.signature = axiom_crypto::sign_transaction(&sk, &tx2);
@@ -1688,6 +1886,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Stake,
+            evidence: None,
         };
         let mut signed_tx = tx.clone();
         signed_tx.signature = axiom_crypto::sign_transaction(&sk, &tx);
@@ -1726,6 +1925,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Unstake,
+            evidence: None,
         };
         let mut signed_tx = tx.clone();
         signed_tx.signature = axiom_crypto::sign_transaction(&sk, &tx);
@@ -1752,32 +1952,61 @@ mod tests {
     }
 
     #[test]
-    fn test_v2_reject_slash_evidence() {
-        let (state, sk, val_id, acc_id) = create_rich_genesis_state();
-        let staking = StakingState::new_active();
+    fn test_v2_slash_evidence_double_vote_burns_and_jails() {
+        let (state0, sk, val_id, acc_id) = create_rich_genesis_state();
+        let (state, staking) = migrate_to_v2(&state0, &val_id);
+        let height = V2_ACTIVATION_HEIGHT + 1;
+
+        let mut vote_a = axiom_primitives::Vote {
+            height,
+            round: 0,
+            phase: axiom_primitives::VotePhase::Prevote,
+            block_hash: Some(BlockHash([1u8; 32])),
+            validator_id: val_id,
+            signature: Signature([0u8; 64]),
+        };
+        vote_a.signature = axiom_crypto::sign_consensus_vote(&sk, &vote_a);
+
+        let mut vote_b = axiom_primitives::Vote {
+            height,
+            round: 0,
+            phase: axiom_primitives::VotePhase::Prevote,
+            block_hash: Some(BlockHash([2u8; 32])),
+            validator_id: val_id,
+            signature: Signature([0u8; 64]),
+        };
+        vote_b.signature = axiom_crypto::sign_consensus_vote(&sk, &vote_b);
+
+        let evidence = axiom_primitives::Evidence::DoubleVote {
+            vote_a: Box::new(vote_a),
+            vote_b: Box::new(vote_b),
+        };
 
         let tx = Transaction {
             sender: acc_id,
-            recipient: acc_id,
-            amount: 100_000,
+            recipient: AccountId(val_id.0),
+            amount: 0,
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::SlashEvidence,
+            evidence: Some(evidence),
         };
         let mut signed_tx = tx.clone();
-        signed_tx.signature = axiom_crypto::sign_transaction(&sk, &tx);
+        signed_tx.signature = axiom_crypto::sign_transaction_for_height(height, &sk, &tx);
 
-        let res = execute_proposal_v2(
-            &state,
-            &staking,
-            &[signed_tx],
-            &val_id,
-            V2_ACTIVATION_HEIGHT,
-        );
-        assert!(matches!(
-            res,
-            Err(ExecutionError::SlashEvidenceNotImplemented)
-        ));
+        let before_supply = state.total_supply;
+        let (new_state, new_staking, _) =
+            execute_proposal_v2(&state, &staking, &[signed_tx], &val_id, height).unwrap();
+
+        let vid = ValidatorId(acc_id.0);
+        let before_stake = staking.stakes.get(&vid).unwrap().0;
+        let after_stake = new_staking.stakes.get(&vid).unwrap().0;
+        let expected_slash = before_stake * SLASH_PERCENTAGE / 100;
+        assert_eq!(after_stake, before_stake - expected_slash);
+        assert!(!new_state.get_validator(&vid).unwrap().active);
+        assert!(new_staking.jailed_validators.contains(&vid));
+        assert_eq!(new_staking.epoch, staking.epoch + 1);
+        assert_eq!(new_state.total_supply, before_supply - expected_slash + 10);
     }
 
     #[test]
@@ -1793,6 +2022,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Stake,
+            evidence: None,
         };
         let mut signed_tx = tx.clone();
         signed_tx.signature = axiom_crypto::sign_transaction_for_height(height, &sk, &tx);
@@ -1850,6 +2080,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Stake,
+            evidence: None,
         };
         let mut signed_tx = tx.clone();
         signed_tx.signature = axiom_crypto::sign_transaction_for_height(height, &sk, &tx);
@@ -1900,6 +2131,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Unstake,
+            evidence: None,
         };
         let mut signed_unstake = unstake_tx.clone();
         signed_unstake.signature =
@@ -1926,6 +2158,7 @@ mod tests {
             height + UNBONDING_PERIOD
         );
         assert!(!state2.get_validator(&vid).unwrap().active);
+        assert_eq!(staking2.epoch, staking.epoch + 1);
     }
 
     #[test]
@@ -1982,6 +2215,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Unstake,
+            evidence: None,
         };
         let mut signed_tx = tx.clone();
         signed_tx.signature = axiom_crypto::sign_transaction_for_height(height, &sk1, &tx);
@@ -2009,6 +2243,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Unstake,
+            evidence: None,
         };
         let mut signed_unstake = unstake_tx.clone();
         signed_unstake.signature =
@@ -2083,6 +2318,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let mut signed_tx = tx.clone();
         signed_tx.signature = axiom_crypto::sign_transaction_for_height(height, &sk, &tx);
@@ -2321,6 +2557,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let mut signed_tx_1 = tx_1.clone();
         signed_tx_1.signature = axiom_crypto::sign_transaction(&sk_val_1, &tx_1);
@@ -2383,6 +2620,7 @@ mod tests {
             nonce: 0,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let mut signed_tx_2_invalid_nonce = tx_2_invalid_nonce.clone();
         signed_tx_2_invalid_nonce.signature =
@@ -2414,6 +2652,7 @@ mod tests {
             nonce: 1,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let mut signed_tx_3_invalid_sig = tx_3_invalid_sig.clone();
         signed_tx_3_invalid_sig.signature =
@@ -2454,6 +2693,7 @@ mod tests {
             nonce: 1,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let mut signed_tx_4_to_new_account = tx_4_to_new_account.clone();
         signed_tx_4_to_new_account.signature =

@@ -195,6 +195,7 @@ mod tests {
             nonce: 0,
             signature: axiom_primitives::Signature([0u8; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let mut signed_tx = tx.clone();
         signed_tx.signature = axiom_crypto::sign_transaction(&sk, &tx);

@@ -99,7 +99,7 @@ impl Engine {
         let block = Block {
             parent_hash: input.parent_hash,
             height: self.height,
-            epoch: 0,
+            epoch: input.staking.epoch,
             protocol_version: ProtocolVersion::V2.as_u64(),
             round: self.round,
             proposer_id: *input.proposer_id,
@@ -180,6 +180,18 @@ impl Engine {
             return Err(ExecutionError::InvalidProtocolVersion {
                 expected: ProtocolVersion::V2.as_u64(),
                 got: proposal.block.protocol_version,
+            });
+        }
+
+        let expected_epoch = if proposal.height == V2_ACTIVATION_HEIGHT && staking.is_empty() {
+            0
+        } else {
+            staking.epoch
+        };
+        if proposal.block.epoch != expected_epoch {
+            return Err(ExecutionError::InvalidEpoch {
+                expected: expected_epoch,
+                got: proposal.block.epoch,
             });
         }
 

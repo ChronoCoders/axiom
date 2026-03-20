@@ -533,6 +533,8 @@ pub struct Transaction {
     pub signature: Signature,
     #[serde(default)]
     pub tx_type: TransactionType,
+    #[serde(default)]
+    pub evidence: Option<Evidence>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -697,6 +699,62 @@ pub fn serialize_transaction_canonical_v2(tx: &Transaction) -> Vec<u8> {
     serialize_string(&to_hex(&tx.recipient.0), &mut buf);
     serialize_u64(tx.amount, &mut buf);
     serialize_u64(tx.nonce, &mut buf);
+    if tx.tx_type == TransactionType::SlashEvidence {
+        if let Some(evidence) = tx.evidence.as_ref() {
+            let ev_bytes = serialize_evidence_canonical(evidence);
+            let len = ev_bytes.len() as u32;
+            buf.extend_from_slice(&len.to_be_bytes());
+            buf.extend_from_slice(&ev_bytes);
+        } else {
+            buf.extend_from_slice(&0u32.to_be_bytes());
+        }
+    }
+    buf
+}
+
+pub fn serialize_evidence_canonical(evidence: &Evidence) -> Vec<u8> {
+    let mut buf = Vec::new();
+    match evidence {
+        Evidence::DoublePropose {
+            proposal_a,
+            proposal_b,
+        } => {
+            buf.push(0);
+            let a = serialize_signed_proposal_canonical(proposal_a);
+            let b = serialize_signed_proposal_canonical(proposal_b);
+            let (first, second) = if a <= b { (a, b) } else { (b, a) };
+            let len1 = first.len() as u32;
+            buf.extend_from_slice(&len1.to_be_bytes());
+            buf.extend_from_slice(&first);
+            let len2 = second.len() as u32;
+            buf.extend_from_slice(&len2.to_be_bytes());
+            buf.extend_from_slice(&second);
+        }
+        Evidence::DoubleVote { vote_a, vote_b } => {
+            buf.push(1);
+            let a = serialize_signed_vote_canonical(vote_a);
+            let b = serialize_signed_vote_canonical(vote_b);
+            let (first, second) = if a <= b { (a, b) } else { (b, a) };
+            let len1 = first.len() as u32;
+            buf.extend_from_slice(&len1.to_be_bytes());
+            buf.extend_from_slice(&first);
+            let len2 = second.len() as u32;
+            buf.extend_from_slice(&len2.to_be_bytes());
+            buf.extend_from_slice(&second);
+        }
+    }
+    buf
+}
+
+fn serialize_signed_vote_canonical(vote: &Vote) -> Vec<u8> {
+    let mut buf = serialize_vote_canonical(vote);
+    buf.extend_from_slice(&vote.signature.0);
+    buf
+}
+
+fn serialize_signed_proposal_canonical(proposal: &Proposal) -> Vec<u8> {
+    let mut buf = serialize_proposal_canonical(proposal);
+    buf.extend_from_slice(&proposal.signature.0);
     buf
 }
 
@@ -902,6 +960,7 @@ mod tests {
             nonce: 10,
             signature: Signature([0x33; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let bytes = serialize_transaction_canonical(&tx);
 
@@ -923,6 +982,7 @@ mod tests {
             nonce: 10,
             signature: Signature([0x33; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let b1 = serialize_transaction_canonical(&tx);
         let b2 = serialize_transaction_canonical(&tx);
@@ -1215,6 +1275,7 @@ mod tests {
             nonce: 10,
             signature: Signature([0x33; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
         let tx_bytes = serialize_transaction_canonical(&tx);
         assert_eq!(tx_bytes.len(), 152);

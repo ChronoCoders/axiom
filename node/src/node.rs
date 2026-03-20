@@ -1,13 +1,13 @@
 use axiom_api::{app_router, AppState};
 use axiom_consensus::bft::{Engine as BftEngine, Outbound as BftOutbound, Step as BftStep};
 use axiom_consensus::{construct_block, validate_and_commit_block};
-use axiom_crypto::{compute_block_hash, sign_vote, verify_vote};
+use axiom_crypto::{compute_block_hash, sign_transaction_for_height, sign_vote, verify_vote};
 use axiom_execution::{compute_state_hash, select_fallback_proposer, select_proposer};
 use axiom_mempool::Mempool;
 use axiom_network::{Network, NetworkConfig, NetworkMessage};
 use axiom_primitives::{
-    Block, BlockHash, LockState, ProtocolVersion, PublicKey, Signature, ValidatorId,
-    ValidatorSignature, VotePhase, PROTOCOL_VERSION,
+    AccountId, Block, BlockHash, Evidence, LockState, ProtocolVersion, PublicKey, Signature,
+    Transaction, TransactionType, ValidatorId, ValidatorSignature, VotePhase, PROTOCOL_VERSION,
 };
 use axiom_storage::Storage;
 use axum_server::tls_rustls::RustlsConfig;
@@ -698,8 +698,47 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                             }
                         }
                         BftOutbound::Evidence(evidence) => {
-                            if let Err(e) = net_tx.send(NetworkMessage::Evidence(evidence)).await {
+                            if let Err(e) = net_tx.send(NetworkMessage::Evidence(evidence.clone())).await {
                                 tracing::error!("Failed to broadcast evidence: {e}");
+                            }
+
+                            if let (Some(my_vid), Some(sk)) = (&my_validator_id, &my_private_key) {
+                                let maybe_tx: Option<Transaction> = (|| {
+                                    let state_guard = state.lock().ok()?;
+                                    let sender_account = state_guard
+                                        .get_validator(my_vid)
+                                        .map(|v| v.account_id)?;
+                                    let nonce = state_guard.get_account(&sender_account)?.nonce;
+                                    let offender = match &evidence {
+                                        Evidence::DoubleVote { vote_a, .. } => vote_a.validator_id,
+                                        Evidence::DoublePropose { proposal_a, .. } => {
+                                            proposal_a.proposer_id
+                                        }
+                                    };
+                                    let offender_account = state_guard
+                                        .get_validator(&offender)
+                                        .map(|v| v.account_id)
+                                        .unwrap_or(AccountId(offender.0));
+
+                                    let mut tx = Transaction {
+                                        sender: sender_account,
+                                        recipient: offender_account,
+                                        amount: 0,
+                                        nonce,
+                                        signature: Signature([0u8; 64]),
+                                        tx_type: TransactionType::SlashEvidence,
+                                        evidence: Some(evidence.clone()),
+                                    };
+                                    tx.signature = sign_transaction_for_height(next_height, sk, &tx);
+                                    Some(tx)
+                                })();
+
+                                if let Some(tx) = maybe_tx {
+                                    if let Ok(mut mempool_guard) = mempool.lock() {
+                                        let _ = mempool_guard.add_for_height(next_height, tx.clone());
+                                    }
+                                    let _ = net_tx.send(NetworkMessage::TransactionGossip(tx)).await;
+                                }
                             }
                         }
                         BftOutbound::CommittedBlock(block) => {
@@ -777,8 +816,47 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                 for out in additional {
                     match out {
                         BftOutbound::Evidence(evidence) => {
-                            if let Err(e) = net_tx.send(NetworkMessage::Evidence(evidence)).await {
+                            if let Err(e) = net_tx.send(NetworkMessage::Evidence(evidence.clone())).await {
                                 tracing::error!("Failed to broadcast evidence: {e}");
+                            }
+
+                            if let (Some(my_vid), Some(sk)) = (&my_validator_id, &my_private_key) {
+                                let maybe_tx: Option<Transaction> = (|| {
+                                    let state_guard = state.lock().ok()?;
+                                    let sender_account = state_guard
+                                        .get_validator(my_vid)
+                                        .map(|v| v.account_id)?;
+                                    let nonce = state_guard.get_account(&sender_account)?.nonce;
+                                    let offender = match &evidence {
+                                        Evidence::DoubleVote { vote_a, .. } => vote_a.validator_id,
+                                        Evidence::DoublePropose { proposal_a, .. } => {
+                                            proposal_a.proposer_id
+                                        }
+                                    };
+                                    let offender_account = state_guard
+                                        .get_validator(&offender)
+                                        .map(|v| v.account_id)
+                                        .unwrap_or(AccountId(offender.0));
+
+                                    let mut tx = Transaction {
+                                        sender: sender_account,
+                                        recipient: offender_account,
+                                        amount: 0,
+                                        nonce,
+                                        signature: Signature([0u8; 64]),
+                                        tx_type: TransactionType::SlashEvidence,
+                                        evidence: Some(evidence.clone()),
+                                    };
+                                    tx.signature = sign_transaction_for_height(next_height, sk, &tx);
+                                    Some(tx)
+                                })();
+
+                                if let Some(tx) = maybe_tx {
+                                    if let Ok(mut mempool_guard) = mempool.lock() {
+                                        let _ = mempool_guard.add_for_height(next_height, tx.clone());
+                                    }
+                                    let _ = net_tx.send(NetworkMessage::TransactionGossip(tx)).await;
+                                }
                             }
                         }
                         BftOutbound::CommittedBlock(block) => {
@@ -841,7 +919,59 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                     for out in outs {
                                         if let BftOutbound::Evidence(evidence) = out {
                                             let _ =
-                                                net_tx.send(NetworkMessage::Evidence(evidence)).await;
+                                                net_tx.send(NetworkMessage::Evidence(evidence.clone())).await;
+
+                                            if let (Some(my_vid), Some(sk)) =
+                                                (&my_validator_id, &my_private_key)
+                                            {
+                                                let maybe_tx: Option<Transaction> = (|| {
+                                                    let state_guard = state.lock().ok()?;
+                                                    let sender_account = state_guard
+                                                        .get_validator(my_vid)
+                                                        .map(|v| v.account_id)?;
+                                                    let nonce =
+                                                        state_guard.get_account(&sender_account)?.nonce;
+                                                    let offender = match &evidence {
+                                                        Evidence::DoubleVote { vote_a, .. } => {
+                                                            vote_a.validator_id
+                                                        }
+                                                        Evidence::DoublePropose {
+                                                            proposal_a,
+                                                            ..
+                                                        } => proposal_a.proposer_id,
+                                                    };
+                                                    let offender_account = state_guard
+                                                        .get_validator(&offender)
+                                                        .map(|v| v.account_id)
+                                                        .unwrap_or(AccountId(offender.0));
+
+                                                    let mut tx = Transaction {
+                                                        sender: sender_account,
+                                                        recipient: offender_account,
+                                                        amount: 0,
+                                                        nonce,
+                                                        signature: Signature([0u8; 64]),
+                                                        tx_type: TransactionType::SlashEvidence,
+                                                        evidence: Some(evidence.clone()),
+                                                    };
+                                                    tx.signature = sign_transaction_for_height(
+                                                        next_height,
+                                                        sk,
+                                                        &tx,
+                                                    );
+                                                    Some(tx)
+                                                })();
+
+                                                if let Some(tx) = maybe_tx {
+                                                    if let Ok(mut mempool_guard) = mempool.lock() {
+                                                        let _ = mempool_guard
+                                                            .add_for_height(next_height, tx.clone());
+                                                    }
+                                                    let _ = net_tx
+                                                        .send(NetworkMessage::TransactionGossip(tx))
+                                                        .await;
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -914,6 +1044,45 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                             }
                                         }
                                         Err(e) => tracing::warn!("Rejected committed block: {e}"),
+                                    }
+                                }
+                                NetworkMessage::Evidence(evidence) => {
+                                    if let (Some(my_vid), Some(sk)) = (&my_validator_id, &my_private_key) {
+                                        let maybe_tx: Option<Transaction> = (|| {
+                                            let state_guard = state.lock().ok()?;
+                                            let sender_account = state_guard
+                                                .get_validator(my_vid)
+                                                .map(|v| v.account_id)?;
+                                            let nonce = state_guard.get_account(&sender_account)?.nonce;
+                                            let offender = match &evidence {
+                                                Evidence::DoubleVote { vote_a, .. } => vote_a.validator_id,
+                                                Evidence::DoublePropose { proposal_a, .. } => proposal_a.proposer_id,
+                                            };
+                                            let offender_account = state_guard
+                                                .get_validator(&offender)
+                                                .map(|v| v.account_id)
+                                                .unwrap_or(AccountId(offender.0));
+
+                                            let mut tx = Transaction {
+                                                sender: sender_account,
+                                                recipient: offender_account,
+                                                amount: 0,
+                                                nonce,
+                                                signature: Signature([0u8; 64]),
+                                                tx_type: TransactionType::SlashEvidence,
+                                                evidence: Some(evidence),
+                                            };
+                                            tx.signature =
+                                                sign_transaction_for_height(next_height, sk, &tx);
+                                            Some(tx)
+                                        })();
+
+                                        if let Some(tx) = maybe_tx {
+                                            if let Ok(mut mempool_guard) = mempool.lock() {
+                                                let _ = mempool_guard.add_for_height(next_height, tx.clone());
+                                            }
+                                            let _ = net_tx.send(NetworkMessage::TransactionGossip(tx)).await;
+                                        }
                                     }
                                 }
                                 _ => {}

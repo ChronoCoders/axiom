@@ -76,6 +76,9 @@ fn mk_state_and_staking() -> (State, StakingState, Vec<(ValidatorId, PrivateKey)
         minimum_stake: axiom_primitives::MIN_VALIDATOR_STAKE,
         unbonding_period: axiom_primitives::UNBONDING_PERIOD,
         unbonding_queue: Vec::new(),
+        epoch: 0,
+        jailed_validators: std::collections::BTreeSet::new(),
+        processed_evidence: std::collections::BTreeSet::new(),
     };
 
     (state, staking, vec![(v1, sk1), (v2, sk2), (v3, sk3)])

@@ -198,6 +198,7 @@ fn test_vector_9_replay_test() {
         nonce: 0,                      // Account A starts with nonce 0.
         signature: Signature([0; 64]), // Placeholder
         tx_type: TransactionType::Transfer,
+        evidence: None,
     };
     tx.signature = sign_transaction(&ctx.acc_a_sk, &tx);
 
@@ -315,6 +316,7 @@ fn test_vector_10_determinism_test() {
         nonce: 0,
         signature: Signature([0; 64]),
         tx_type: TransactionType::Transfer,
+        evidence: None,
     };
     tx.signature = sign_transaction(&ctx.acc_a_sk, &tx);
 

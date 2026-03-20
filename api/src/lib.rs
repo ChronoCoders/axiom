@@ -606,12 +606,32 @@ async fn submit_transaction(
         ));
     }
 
-    // 2. Amount > 0
-    if tx.amount == 0 {
+    // 2. Amount / Evidence sanity
+    if tx.tx_type != TransactionType::SlashEvidence && tx.amount == 0 {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ApiError::new("Amount must be positive", "invalid_amount")),
         ));
+    }
+    if tx.tx_type == TransactionType::SlashEvidence {
+        if tx.amount != 0 {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ApiError::new(
+                    "SlashEvidence amount must be 0",
+                    "invalid_amount",
+                )),
+            ));
+        }
+        if tx.evidence.is_none() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ApiError::new(
+                    "SlashEvidence must include evidence",
+                    "missing_evidence",
+                )),
+            ));
+        }
     }
 
     // 3. Sender Exists and Balance/Nonce Check

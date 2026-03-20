@@ -5,7 +5,7 @@ use axiom_primitives::{
 };
 use axiom_state::{Account, StakingState, State, Validator};
 use rusqlite::{params, Connection};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
@@ -144,6 +144,28 @@ impl Storage {
                 validator_id TEXT NOT NULL,
                 amount INTEGER NOT NULL,
                 release_height INTEGER NOT NULL
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS staking_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS jailed_validators (
+                validator_id TEXT PRIMARY KEY
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS processed_evidence (
+                evidence_hash TEXT PRIMARY KEY
             )",
             [],
         )?;
@@ -757,6 +779,28 @@ impl Storage {
                     params![entry.validator_id.to_string(), entry.amount.0, entry.release_height],
                 )?;
             }
+
+            tx.execute("DELETE FROM staking_meta", [])?;
+            tx.execute(
+                "INSERT OR REPLACE INTO staking_meta (key, value) VALUES ('epoch', ?1)",
+                params![staking.epoch.to_string()],
+            )?;
+
+            tx.execute("DELETE FROM jailed_validators", [])?;
+            for vid in &staking.jailed_validators {
+                tx.execute(
+                    "INSERT INTO jailed_validators (validator_id) VALUES (?1)",
+                    params![vid.to_string()],
+                )?;
+            }
+
+            tx.execute("DELETE FROM processed_evidence", [])?;
+            for h in &staking.processed_evidence {
+                tx.execute(
+                    "INSERT INTO processed_evidence (evidence_hash) VALUES (?1)",
+                    params![hex::encode(h)],
+                )?;
+            }
         }
 
         tx.commit()?;
@@ -787,6 +831,54 @@ impl Storage {
             stakes.insert(vid, StakeAmount(amount));
         }
 
+        let epoch: u64 = match conn.query_row(
+            "SELECT value FROM staking_meta WHERE key = 'epoch'",
+            [],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(s) => s.parse::<u64>().unwrap_or(0),
+            Err(rusqlite::Error::QueryReturnedNoRows) => 0,
+            Err(e) => return Err(StorageError::Database(e)),
+        };
+
+        let mut jailed_validators = BTreeSet::new();
+        let mut stmt =
+            conn.prepare("SELECT validator_id FROM jailed_validators ORDER BY validator_id")?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let vid_str: String = row.get(0)?;
+            let vid_bytes = hex::decode(&vid_str).map_err(|e| {
+                StorageError::Corruption(format!("Invalid validator id in jailed_validators: {e}"))
+            })?;
+            if vid_bytes.len() != 32 {
+                return Err(StorageError::Corruption(
+                    "Invalid validator id length in jailed_validators".to_string(),
+                ));
+            }
+            let mut vid_arr = [0u8; 32];
+            vid_arr.copy_from_slice(&vid_bytes);
+            jailed_validators.insert(ValidatorId(vid_arr));
+        }
+
+        let mut processed_evidence = BTreeSet::new();
+        let mut stmt =
+            conn.prepare("SELECT evidence_hash FROM processed_evidence ORDER BY evidence_hash")?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let h_str: String = row.get(0)?;
+            let bytes = hex::decode(&h_str).map_err(|e| {
+                StorageError::Corruption(format!("Invalid evidence hash in processed_evidence: {e}"))
+            })?;
+            if bytes.len() != 32 {
+                return Err(StorageError::Corruption(
+                    "Invalid evidence hash length in processed_evidence".to_string(),
+                ));
+            }
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&bytes);
+            processed_evidence.insert(arr);
+        }
+
         let mut unbonding_queue = Vec::new();
         let mut stmt = conn.prepare(
             "SELECT validator_id, amount, release_height FROM unbonding_queue ORDER BY id",
@@ -813,7 +905,12 @@ impl Storage {
             });
         }
 
-        if stakes.is_empty() && unbonding_queue.is_empty() {
+        if stakes.is_empty()
+            && unbonding_queue.is_empty()
+            && epoch == 0
+            && jailed_validators.is_empty()
+            && processed_evidence.is_empty()
+        {
             Ok(StakingState::empty())
         } else {
             Ok(StakingState {
@@ -821,6 +918,9 @@ impl Storage {
                 minimum_stake: axiom_primitives::MIN_VALIDATOR_STAKE,
                 unbonding_period: axiom_primitives::UNBONDING_PERIOD,
                 unbonding_queue,
+                epoch,
+                jailed_validators,
+                processed_evidence,
             })
         }
     }

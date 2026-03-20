@@ -117,6 +117,7 @@ mod tests {
             nonce,
             signature: Signature([0u8; 64]),
             tx_type: TransactionType::Transfer,
+            evidence: None,
         };
 
         let sig = sign_transaction(&sk, &tx);

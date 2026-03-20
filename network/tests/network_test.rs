@@ -30,6 +30,7 @@ fn dummy_tx() -> Transaction {
         nonce: 1,
         signature: Signature([5; 64]),
         tx_type: TransactionType::Transfer,
+        evidence: None,
     }
 }
 

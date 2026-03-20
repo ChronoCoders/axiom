@@ -232,6 +232,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         nonce: 0,
         signature: axiom_primitives::Signature([0u8; 64]),
         tx_type: TransactionType::Transfer,
+        evidence: None,
     };
 
     let tx1_hash = axiom_crypto::compute_transaction_hash(&tx1_unsigned);
@@ -249,6 +250,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         nonce: 0,
         signature: tx1_sig,
         tx_type: TransactionType::Transfer,
+        evidence: None,
     };
 
     let (state_after_b2, state_hash_h2) = axiom_execution::execute_proposal(
@@ -305,6 +307,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         nonce: 1,
         signature: axiom_primitives::Signature([0u8; 64]),
         tx_type: TransactionType::Transfer,
+        evidence: None,
     };
 
     let tx2_hash = axiom_crypto::compute_transaction_hash(&tx2_unsigned);
@@ -322,6 +325,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         nonce: 1,
         signature: tx2_sig,
         tx_type: TransactionType::Transfer,
+        evidence: None,
     };
 
     let (state_after_b3, state_hash_h3) = axiom_execution::execute_proposal(
@@ -383,6 +387,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         nonce: 1,
         signature: axiom_primitives::Signature([0u8; 64]),
         tx_type: TransactionType::Transfer,
+        evidence: None,
     };
 
     let tx_hash = axiom_crypto::compute_transaction_hash(&tx);
@@ -396,6 +401,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         nonce: 1,
         signature: axiom_crypto::sign_transaction(sender_sk, &tx),
         tx_type: TransactionType::Transfer,
+        evidence: None,
     };
     let sig_prefix = &to_hex(&signed_tx.signature.0)[..32];
     println!("Transaction signature: {sig_prefix}...");
