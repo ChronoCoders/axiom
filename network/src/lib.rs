@@ -1,8 +1,11 @@
 use axiom_primitives::Block;
 use axiom_primitives::BlockHash;
+use axiom_primitives::Evidence;
+use axiom_primitives::Proposal;
 use axiom_primitives::StateHash;
 use axiom_primitives::Transaction;
 use axiom_primitives::ValidatorSignature;
+use axiom_primitives::Vote;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -18,6 +21,9 @@ pub enum NetworkMessage {
     BlockProposal(Block),
     Vote(ValidatorSignature, BlockHash, u64), // sig, block_hash, height
     TransactionGossip(Transaction),
+    Proposal(Proposal),
+    ConsensusVote(Vote),
+    Evidence(Evidence),
     StatusRequest,
     StatusResponse {
         protocol_version: u64,

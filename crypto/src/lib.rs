@@ -1,7 +1,9 @@
 use axiom_primitives::{
     serialize_block_canonical, serialize_string, serialize_transaction_canonical_v1,
-    serialize_transaction_canonical_v2, serialize_u64, to_hex, Block, BlockHash, GenesisConfig,
-    ProtocolVersion, PublicKey, Signature, StateHash, Transaction, TransactionHash,
+    serialize_transaction_canonical_v2, serialize_u64, serialize_vote_canonical,
+    serialize_proposal_canonical, to_hex, Block, BlockHash, GenesisConfig, ProtocolVersion,
+    Proposal, PublicKey, Signature, StateHash, Transaction, TransactionHash, ValidatorId, Vote,
+    VotePhase,
 };
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
@@ -200,6 +202,84 @@ pub fn verify_vote(
     verifying_key
         .verify(&msg_hash, &sig)
         .map_err(|_| CryptoError::InvalidSignature)
+}
+
+pub fn sign_consensus_vote(private_key: &PrivateKey, vote: &Vote) -> Signature {
+    let bytes = serialize_vote_canonical(vote);
+    let msg_hash = sha256(&bytes);
+    let sig = private_key.sign(&msg_hash);
+    Signature(sig.to_bytes())
+}
+
+pub fn verify_consensus_vote(vote: &Vote) -> Result<(), CryptoError> {
+    let bytes = serialize_vote_canonical(vote);
+    let msg_hash = sha256(&bytes);
+
+    let verifying_key = VerifyingKey::from_bytes(&vote.validator_id.0)
+        .map_err(|_| CryptoError::InvalidPublicKey)?;
+
+    let sig = ed25519_dalek::Signature::from_bytes(&vote.signature.0);
+
+    verifying_key
+        .verify(&msg_hash, &sig)
+        .map_err(|_| CryptoError::InvalidSignature)
+}
+
+pub fn sign_proposal(private_key: &PrivateKey, proposal: &Proposal) -> Signature {
+    let bytes = serialize_proposal_canonical(proposal);
+    let msg_hash = sha256(&bytes);
+    let sig = private_key.sign(&msg_hash);
+    Signature(sig.to_bytes())
+}
+
+pub fn verify_proposal(proposal: &Proposal) -> Result<(), CryptoError> {
+    let bytes = serialize_proposal_canonical(proposal);
+    let msg_hash = sha256(&bytes);
+
+    let verifying_key = VerifyingKey::from_bytes(&proposal.proposer_id.0)
+        .map_err(|_| CryptoError::InvalidPublicKey)?;
+
+    let sig = ed25519_dalek::Signature::from_bytes(&proposal.signature.0);
+
+    verifying_key
+        .verify(&msg_hash, &sig)
+        .map_err(|_| CryptoError::InvalidSignature)
+}
+
+pub fn sign_precommit(
+    private_key: &PrivateKey,
+    validator_id: &ValidatorId,
+    block_hash: &BlockHash,
+    height: u64,
+    round: u64,
+) -> Signature {
+    let vote = Vote {
+        height,
+        round,
+        phase: VotePhase::Precommit,
+        block_hash: Some(*block_hash),
+        validator_id: *validator_id,
+        signature: Signature([0u8; 64]),
+    };
+    sign_consensus_vote(private_key, &vote)
+}
+
+pub fn verify_precommit(
+    validator_id: &ValidatorId,
+    block_hash: &BlockHash,
+    height: u64,
+    round: u64,
+    signature: &Signature,
+) -> Result<(), CryptoError> {
+    let vote = Vote {
+        height,
+        round,
+        phase: VotePhase::Precommit,
+        block_hash: Some(*block_hash),
+        validator_id: *validator_id,
+        signature: *signature,
+    };
+    verify_consensus_vote(&vote)
 }
 
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {

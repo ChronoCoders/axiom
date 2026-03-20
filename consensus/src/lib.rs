@@ -4,6 +4,8 @@ use axiom_primitives::{Block, BlockHash, ProtocolVersion, Transaction, Validator
 use axiom_state::{State, StakingState};
 use thiserror::Error;
 
+pub mod bft;
+
 #[derive(Debug, Error)]
 pub enum ConsensusError {
     #[error("Execution error: {0}")]

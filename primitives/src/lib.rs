@@ -3,8 +3,8 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use subtle::ConstantTimeEq;
 
-// Protocol v1 constants
-pub const PROTOCOL_VERSION: u64 = 1;
+// Protocol version supported by this node implementation (network identity).
+pub const PROTOCOL_VERSION: u64 = 2;
 pub const MAX_TRANSACTIONS_PER_BLOCK: usize = 1000;
 pub const MAX_BLOCK_SIZE_BYTES: usize = 1_048_576; // 1 MB
 
@@ -131,7 +131,8 @@ impl fmt::Display for Round {
 }
 
 /// Vote type in round-based BFT consensus (v2 scaffolding).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
 pub enum VotePhase {
     Prevote,
     Precommit,
@@ -699,6 +700,33 @@ pub fn serialize_transaction_canonical_v2(tx: &Transaction) -> Vec<u8> {
     buf
 }
 
+pub fn serialize_vote_canonical(vote: &Vote) -> Vec<u8> {
+    let mut buf = Vec::new();
+    serialize_u64(vote.height, &mut buf);
+    serialize_u64(vote.round, &mut buf);
+    buf.push(vote.phase as u8);
+    match vote.block_hash {
+        Some(h) => {
+            buf.push(1);
+            buf.extend_from_slice(&h.0);
+        }
+        None => {
+            buf.push(0);
+        }
+    }
+    buf.extend_from_slice(&vote.validator_id.0);
+    buf
+}
+
+pub fn serialize_proposal_canonical(proposal: &Proposal) -> Vec<u8> {
+    let mut buf = Vec::new();
+    serialize_u64(proposal.height, &mut buf);
+    serialize_u64(proposal.round, &mut buf);
+    buf.extend_from_slice(&proposal.proposer_id.0);
+    buf.extend_from_slice(&serialize_block_canonical(&proposal.block));
+    buf
+}
+
 pub fn serialize_genesis_json(genesis: &GenesisConfig) -> Result<String, PrimitivesError> {
     serde_json::to_string(genesis).map_err(|_| PrimitivesError::SerializationError)
 }
@@ -1006,7 +1034,7 @@ mod tests {
     // 11. Protocol constants
     #[test]
     fn test_protocol_constants() {
-        assert_eq!(PROTOCOL_VERSION, 1);
+        assert_eq!(PROTOCOL_VERSION, 2);
         assert_eq!(MAX_TRANSACTIONS_PER_BLOCK, 1000);
         assert_eq!(MAX_BLOCK_SIZE_BYTES, 1_048_576);
     }

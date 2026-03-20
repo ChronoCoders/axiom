@@ -1,7 +1,7 @@
 use axiom_crypto::compute_block_hash;
 use axiom_primitives::{
     AccountId, Block, BlockHash, LockState, ProtocolVersion, StakeAmount, StateHash, UnbondingEntry,
-    ValidatorId,
+    ValidatorId, Vote, VotePhase,
 };
 use axiom_state::{Account, StakingState, State, Validator};
 use rusqlite::{params, Connection};
@@ -822,6 +822,113 @@ impl Storage {
                 unbonding_period: axiom_primitives::UNBONDING_PERIOD,
                 unbonding_queue,
             })
+        }
+    }
+
+    pub fn save_consensus_vote(&self, vote: &Vote) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| StorageError::LockPoisoned)?;
+        let phase = match vote.phase {
+            VotePhase::Prevote => 0u64,
+            VotePhase::Precommit => 1u64,
+        };
+        let block_hash = vote.block_hash.map(|h| h.to_string());
+        let signature = hex::encode(vote.signature.0);
+        let validator_id = vote.validator_id.to_string();
+
+        let existing = conn.query_row(
+            "SELECT block_hash, signature FROM votes WHERE height = ?1 AND round = ?2 AND phase = ?3 AND validator_id = ?4",
+            params![vote.height, vote.round, phase, validator_id],
+            |row| {
+                let block_hash: Option<String> = row.get(0)?;
+                let signature: String = row.get(1)?;
+                Ok((block_hash, signature))
+            },
+        );
+
+        match existing {
+            Ok((existing_hash, existing_sig)) => {
+                if existing_hash == block_hash && existing_sig == signature {
+                    return Ok(());
+                }
+                return Err(StorageError::Corruption(format!(
+                    "Consensus double-vote attempt at height {} round {} phase {} validator {}",
+                    vote.height, vote.round, phase, vote.validator_id
+                )));
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(e) => return Err(StorageError::Database(e)),
+        }
+
+        conn.execute(
+            "INSERT INTO votes (height, round, phase, validator_id, block_hash, signature) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![vote.height, vote.round, phase, validator_id, block_hash, signature],
+        )?;
+        Ok(())
+    }
+
+    pub fn load_consensus_vote(
+        &self,
+        height: u64,
+        round: u64,
+        phase: VotePhase,
+        validator_id: &ValidatorId,
+    ) -> Result<Option<Vote>> {
+        let conn = self.conn.lock().map_err(|_| StorageError::LockPoisoned)?;
+        let phase_i = match phase {
+            VotePhase::Prevote => 0u64,
+            VotePhase::Precommit => 1u64,
+        };
+        let row = conn.query_row(
+            "SELECT block_hash, signature FROM votes WHERE height = ?1 AND round = ?2 AND phase = ?3 AND validator_id = ?4",
+            params![height, round, phase_i, validator_id.to_string()],
+            |row| {
+                let block_hash: Option<String> = row.get(0)?;
+                let signature: String = row.get(1)?;
+                Ok((block_hash, signature))
+            },
+        );
+
+        match row {
+            Ok((block_hash_str, sig_str)) => {
+                let signature_bytes = hex::decode(sig_str).map_err(|e| {
+                    StorageError::Corruption(format!("Invalid consensus vote signature: {e}"))
+                })?;
+                if signature_bytes.len() != 64 {
+                    return Err(StorageError::Corruption(
+                        "Invalid consensus vote signature length".to_string(),
+                    ));
+                }
+                let mut sig_arr = [0u8; 64];
+                sig_arr.copy_from_slice(&signature_bytes);
+
+                let block_hash = match block_hash_str {
+                    Some(s) => {
+                        let bytes = hex::decode(&s).map_err(|e| {
+                            StorageError::Corruption(format!("Invalid block hash in votes: {e}"))
+                        })?;
+                        if bytes.len() != 32 {
+                            return Err(StorageError::Corruption(
+                                "Invalid block hash length in votes".to_string(),
+                            ));
+                        }
+                        let mut arr = [0u8; 32];
+                        arr.copy_from_slice(&bytes);
+                        Some(BlockHash(arr))
+                    }
+                    None => None,
+                };
+
+                Ok(Some(Vote {
+                    height,
+                    round,
+                    phase,
+                    block_hash,
+                    validator_id: *validator_id,
+                    signature: axiom_primitives::Signature(sig_arr),
+                }))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StorageError::Database(e)),
         }
     }
 

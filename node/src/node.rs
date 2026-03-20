@@ -1,12 +1,13 @@
 use axiom_api::{app_router, AppState};
+use axiom_consensus::bft::{Engine as BftEngine, Outbound as BftOutbound, Step as BftStep};
 use axiom_consensus::{construct_block, validate_and_commit_block};
 use axiom_crypto::{compute_block_hash, sign_vote, verify_vote};
 use axiom_execution::{compute_state_hash, select_fallback_proposer, select_proposer};
 use axiom_mempool::Mempool;
 use axiom_network::{Network, NetworkConfig, NetworkMessage};
 use axiom_primitives::{
-    Block, BlockHash, ProtocolVersion, PublicKey, Signature, ValidatorId, ValidatorSignature,
-    PROTOCOL_VERSION,
+    Block, BlockHash, LockState, ProtocolVersion, PublicKey, Signature, ValidatorId,
+    ValidatorSignature, VotePhase, PROTOCOL_VERSION,
 };
 use axiom_storage::Storage;
 use axum_server::tls_rustls::RustlsConfig;
@@ -198,7 +199,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
         peer_api_map,
         local_height: height,
         local_genesis_hash: genesis_hash,
-        local_protocol_version: ProtocolVersion::for_height(height).as_u64(),
+        local_protocol_version: PROTOCOL_VERSION,
     };
 
     let (net_tx, mut net_rx, peer_map) =
@@ -477,6 +478,8 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
     let proposal_timeout = Duration::from_secs(5);
     let max_pending_timeout = Duration::from_secs(30);
     let mut last_height_seen = 0;
+    let mut bft_engine: Option<BftEngine> = None;
+    let mut bft_step_started_at: Option<std::time::Instant> = None;
 
     loop {
         if shutdown_rx.try_recv().is_ok() {
@@ -502,6 +505,426 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
             last_proposal_time = std::time::Instant::now();
             pending_block_since = None;
             last_height_seen = height;
+        }
+
+        if ProtocolVersion::for_height(next_height) == ProtocolVersion::V2 {
+            if bft_engine.as_ref().map(|e| e.height) != Some(next_height) {
+                let lock = match storage.load_lock_state() {
+                    Ok(Some(l)) if l.height == next_height => l,
+                    Ok(_) => LockState {
+                        height: next_height,
+                        round: 0,
+                        block_hash: None,
+                    },
+                    Err(e) => {
+                        tracing::error!("Failed to load lock state: {e}");
+                        LockState {
+                            height: next_height,
+                            round: 0,
+                            block_hash: None,
+                        }
+                    }
+                };
+                let mut eng = BftEngine::new(next_height, lock.clone());
+                eng.round = lock.round;
+                eng.step = BftStep::Proposal;
+                bft_engine = Some(eng);
+                bft_step_started_at = Some(std::time::Instant::now());
+            }
+
+            let mut pending_outbound: Vec<BftOutbound> = Vec::new();
+
+            if let (Some(val_id), Some(sk)) = (&my_validator_id, &my_private_key) {
+                let parent_block = match storage.get_block_by_height(height) {
+                    Ok(Some(b)) => b,
+                    Ok(None) => {
+                        tracing::error!("Missing parent block at height {height}");
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                        continue;
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to get parent block: {e}");
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                        continue;
+                    }
+                };
+                let parent_hash = compute_block_hash(&parent_block);
+
+                let state_guard = match state.lock() {
+                    Ok(g) => g,
+                    Err(e) => {
+                        tracing::error!("State lock poisoned: {e}");
+                        break;
+                    }
+                };
+                let staking_guard = match staking_state.lock() {
+                    Ok(g) => g,
+                    Err(e) => {
+                        tracing::error!("Staking lock poisoned: {e}");
+                        break;
+                    }
+                };
+
+                if let Some(engine) = bft_engine.as_mut() {
+                    if bft_step_started_at.is_none() {
+                        bft_step_started_at = Some(std::time::Instant::now());
+                    }
+                    let started_at = bft_step_started_at.unwrap();
+                    let step_elapsed = started_at.elapsed();
+
+                    let base = Duration::from_millis(800);
+                    let per_round = Duration::from_millis(200 * engine.round.min(20));
+                    let propose_to = base + per_round;
+                    let prevote_to = base + per_round;
+                    let precommit_to = base + per_round;
+
+                    if engine.step == BftStep::Proposal && step_elapsed > propose_to {
+                        engine.step = BftStep::Prevote;
+                        bft_step_started_at = Some(std::time::Instant::now());
+                    } else if engine.step == BftStep::Prevote && step_elapsed > prevote_to {
+                        engine.step = BftStep::Precommit;
+                        bft_step_started_at = Some(std::time::Instant::now());
+                    } else if engine.step == BftStep::Precommit && step_elapsed > precommit_to {
+                        engine.round = engine.round.saturating_add(1);
+                        engine.step = BftStep::Proposal;
+                        bft_step_started_at = Some(std::time::Instant::now());
+                    }
+
+                    if engine.step == BftStep::Proposal {
+                        match engine.proposer_for_round(&state_guard, &staking_guard) {
+                            Ok(proposer) if proposer == *val_id => {
+                                let mempool_guard = match mempool.lock() {
+                                    Ok(g) => g,
+                                    Err(e) => {
+                                        tracing::error!("Mempool lock poisoned: {e}");
+                                        break;
+                                    }
+                                };
+                                let txs = mempool_guard.get_batch(1000);
+                                drop(mempool_guard);
+
+                                let timestamp = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs();
+                                match engine.make_proposal(axiom_consensus::bft::ProposalInputs {
+                                    state: &state_guard,
+                                    staking: &staking_guard,
+                                    parent_hash,
+                                    transactions: txs,
+                                    proposer_key: sk,
+                                    proposer_id: val_id,
+                                    timestamp,
+                                }) {
+                                    Ok(out) => pending_outbound.push(out),
+                                    Err(e) => tracing::error!("Failed to make proposal: {e}"),
+                                }
+                            }
+                            Ok(_) => {}
+                            Err(e) => tracing::error!("Failed to select proposer: {e}"),
+                        }
+                    }
+
+                    if engine.step != BftStep::Proposal {
+                        if let Ok(Some(out)) = engine.make_prevote(
+                            &state_guard,
+                            &staking_guard,
+                            sk,
+                            val_id,
+                        ) {
+                            pending_outbound.push(out);
+                        }
+
+                        if let Ok(Some(out)) =
+                            engine.make_precommit(&state_guard, &staking_guard, sk, val_id)
+                        {
+                            pending_outbound.push(out);
+                        }
+                    }
+                }
+            }
+
+            let mut reset_bft = false;
+            if let Some(engine) = bft_engine.as_mut() {
+                let mut additional = Vec::new();
+                for out in pending_outbound {
+                    match out {
+                        BftOutbound::Proposal(p) => {
+                            if let Err(e) = net_tx.send(NetworkMessage::Proposal(p)).await {
+                                tracing::error!("Failed to broadcast proposal: {e}");
+                            }
+                        }
+                        BftOutbound::Vote(v) => {
+                            let before_lock = engine.lock_state();
+                            if v.phase == VotePhase::Prevote {
+                                if let Err(e) = storage.save_lock_state(&before_lock) {
+                                    tracing::error!("Failed to persist lock state: {e}");
+                                    continue;
+                                }
+                            }
+                            if let Err(e) = storage.save_consensus_vote(&v) {
+                                tracing::error!("Failed to persist consensus vote: {e}");
+                                continue;
+                            }
+                            if let Err(e) = net_tx.send(NetworkMessage::ConsensusVote(v.clone())).await {
+                                tracing::error!("Failed to broadcast consensus vote: {e}");
+                                continue;
+                            }
+                            let state_guard = match state.lock() {
+                                Ok(g) => g,
+                                Err(e) => {
+                                    tracing::error!("State lock poisoned: {e}");
+                                    break;
+                                }
+                            };
+                            let staking_guard = match staking_state.lock() {
+                                Ok(g) => g,
+                                Err(e) => {
+                                    tracing::error!("Staking lock poisoned: {e}");
+                                    break;
+                                }
+                            };
+                            match engine.on_vote(&state_guard, &staking_guard, v) {
+                                Ok(mut outs) => {
+                                    let after_lock = engine.lock_state();
+                                    if after_lock != before_lock {
+                                        if let Err(e) = storage.save_lock_state(&after_lock) {
+                                            tracing::error!("Failed to persist updated lock state: {e}");
+                                        }
+                                    }
+                                    additional.append(&mut outs);
+                                }
+                                Err(e) => tracing::error!("Vote processing error: {e}"),
+                            }
+                        }
+                        BftOutbound::Evidence(evidence) => {
+                            if let Err(e) = net_tx.send(NetworkMessage::Evidence(evidence)).await {
+                                tracing::error!("Failed to broadcast evidence: {e}");
+                            }
+                        }
+                        BftOutbound::CommittedBlock(block) => {
+                            let mut state_guard = match state.lock() {
+                                Ok(g) => g,
+                                Err(e) => {
+                                    tracing::error!("State lock poisoned: {e}");
+                                    break;
+                                }
+                            };
+                            let mut staking_guard = match staking_state.lock() {
+                                Ok(g) => g,
+                                Err(e) => {
+                                    tracing::error!("Staking lock poisoned: {e}");
+                                    break;
+                                }
+                            };
+
+                            let parent_block = match storage.get_block_by_height(height) {
+                                Ok(Some(b)) => b,
+                                Ok(None) => {
+                                    tracing::error!("Missing parent block at height {height}");
+                                    continue;
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to get parent block: {e}");
+                                    continue;
+                                }
+                            };
+                            let parent_hash = compute_block_hash(&parent_block);
+
+                            match validate_and_commit_block(
+                                &state_guard,
+                                &staking_guard,
+                                &block,
+                                &parent_hash,
+                                height,
+                            ) {
+                                Ok((new_state, new_staking)) => {
+                                    if let Err(e) =
+                                        storage.commit_block_v2(&block, &new_state, &new_staking)
+                                    {
+                                        tracing::error!("Failed to commit v2 block: {e}");
+                                        continue;
+                                    }
+                                    *state_guard = new_state;
+                                    *staking_guard = new_staking;
+
+                                    let tx_hashes: Vec<_> = block
+                                        .transactions
+                                        .iter()
+                                        .map(|tx| {
+                                            axiom_crypto::compute_transaction_hash_for_height(
+                                                block.height,
+                                                tx,
+                                            )
+                                        })
+                                        .collect();
+                                    if let Ok(mut mempool_guard) = mempool.lock() {
+                                        mempool_guard.remove_batch(&tx_hashes);
+                                    }
+
+                                    current_height.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                    reset_bft = true;
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to validate/commit v2 block: {e}");
+                                }
+                            }
+                        }
+                        BftOutbound::AdvanceRound { .. } => {}
+                    }
+                }
+
+                for out in additional {
+                    match out {
+                        BftOutbound::Evidence(evidence) => {
+                            if let Err(e) = net_tx.send(NetworkMessage::Evidence(evidence)).await {
+                                tracing::error!("Failed to broadcast evidence: {e}");
+                            }
+                        }
+                        BftOutbound::CommittedBlock(block) => {
+                            if let Err(e) = net_tx.send(NetworkMessage::BlockProposal(block)).await {
+                                tracing::error!("Failed to broadcast committed block: {e}");
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            if reset_bft {
+                bft_engine = None;
+                bft_step_started_at = None;
+                continue;
+            }
+
+            tokio::select! {
+                _ = shutdown_rx.recv() => {
+                    tracing::info!("Consensus loop shutting down...");
+                    break;
+                }
+                msg_opt = net_rx.recv() => {
+                    if let Some(msg) = msg_opt {
+                        if let Some(engine) = bft_engine.as_mut() {
+                            match msg {
+                                NetworkMessage::Proposal(p) => {
+                                    let outs = {
+                                        let state_guard = match state.lock() {
+                                            Ok(g) => g,
+                                            Err(e) => {
+                                                tracing::error!("State lock poisoned: {e}");
+                                                break;
+                                            }
+                                        };
+                                        let staking_guard = match staking_state.lock() {
+                                            Ok(g) => g,
+                                            Err(e) => {
+                                                tracing::error!("Staking lock poisoned: {e}");
+                                                break;
+                                            }
+                                        };
+                                        let before = (engine.round, engine.step);
+                                        match engine.on_proposal(&state_guard, &staking_guard, p) {
+                                            Ok(outs) => {
+                                                if (engine.round, engine.step) != before {
+                                                    bft_step_started_at =
+                                                        Some(std::time::Instant::now());
+                                                }
+                                                outs
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!("Rejected proposal: {e}");
+                                                Vec::new()
+                                            }
+                                        }
+                                    };
+
+                                    for out in outs {
+                                        if let BftOutbound::Evidence(evidence) = out {
+                                            let _ =
+                                                net_tx.send(NetworkMessage::Evidence(evidence)).await;
+                                        }
+                                    }
+                                }
+                                NetworkMessage::ConsensusVote(v) => {
+                                    let outs = {
+                                        let state_guard = match state.lock() {
+                                            Ok(g) => g,
+                                            Err(e) => {
+                                                tracing::error!("State lock poisoned: {e}");
+                                                break;
+                                            }
+                                        };
+                                        let staking_guard = match staking_state.lock() {
+                                            Ok(g) => g,
+                                            Err(e) => {
+                                                tracing::error!("Staking lock poisoned: {e}");
+                                                break;
+                                            }
+                                        };
+                                        let before = (engine.round, engine.step);
+                                        match engine.on_vote(&state_guard, &staking_guard, v) {
+                                            Ok(outs) => {
+                                                if (engine.round, engine.step) != before {
+                                                    bft_step_started_at =
+                                                        Some(std::time::Instant::now());
+                                                }
+                                                outs
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!("Rejected vote: {e}");
+                                                Vec::new()
+                                            }
+                                        }
+                                    };
+
+                                    for out in outs {
+                                        if let BftOutbound::CommittedBlock(block) = out {
+                                            let _ = net_tx.send(NetworkMessage::BlockProposal(block)).await;
+                                        }
+                                    }
+                                }
+                                NetworkMessage::BlockProposal(block) if block.height == next_height => {
+                                    let mut state_guard = match state.lock() {
+                                        Ok(g) => g,
+                                        Err(e) => {
+                                            tracing::error!("State lock poisoned: {e}");
+                                            break;
+                                        }
+                                    };
+                                    let mut staking_guard = match staking_state.lock() {
+                                        Ok(g) => g,
+                                        Err(e) => {
+                                            tracing::error!("Staking lock poisoned: {e}");
+                                            break;
+                                        }
+                                    };
+                                    let parent_block = match storage.get_block_by_height(height) {
+                                        Ok(Some(b)) => b,
+                                        _ => continue,
+                                    };
+                                    let parent_hash = compute_block_hash(&parent_block);
+                                    match validate_and_commit_block(&state_guard, &staking_guard, &block, &parent_hash, height) {
+                                        Ok((new_state, new_staking)) => {
+                                            if storage.commit_block_v2(&block, &new_state, &new_staking).is_ok() {
+                                                *state_guard = new_state;
+                                                *staking_guard = new_staking;
+                                                current_height.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                                bft_engine = None;
+                                                bft_step_started_at = None;
+                                            }
+                                        }
+                                        Err(e) => tracing::warn!("Rejected committed block: {e}"),
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                _ = tokio::time::sleep(Duration::from_millis(200)) => {}
+            }
+
+            continue;
         }
 
         // ---------------------------------------------------------------------

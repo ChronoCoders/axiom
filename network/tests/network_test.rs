@@ -1,7 +1,7 @@
 use axiom_network::{Network, NetworkConfig, NetworkMessage};
 use axiom_primitives::{
-    AccountId, Block, BlockHash, Signature, StateHash, Transaction, TransactionType, ValidatorId,
-    ValidatorSignature,
+    AccountId, Block, BlockHash, Evidence, Proposal, Signature, StateHash, Transaction,
+    TransactionType, ValidatorId, ValidatorSignature, Vote, VotePhase,
 };
 use std::net::SocketAddr;
 use tokio::time::{sleep, timeout, Duration};
@@ -44,6 +44,41 @@ fn dummy_vote() -> NetworkMessage {
     )
 }
 
+fn dummy_proposal() -> Proposal {
+    let mut block = dummy_block();
+    block.height = 10_000;
+    block.protocol_version = axiom_primitives::PROTOCOL_VERSION_V2;
+    block.round = 0;
+    Proposal {
+        height: 10_000,
+        round: 0,
+        block,
+        proposer_id: ValidatorId([1; 32]),
+        signature: Signature([10; 64]),
+    }
+}
+
+fn dummy_consensus_vote() -> Vote {
+    Vote {
+        height: 10_000,
+        round: 0,
+        phase: VotePhase::Prevote,
+        block_hash: Some(BlockHash([11; 32])),
+        validator_id: ValidatorId([6; 32]),
+        signature: Signature([12; 64]),
+    }
+}
+
+fn dummy_evidence() -> Evidence {
+    let v1 = dummy_consensus_vote();
+    let mut v2 = v1.clone();
+    v2.block_hash = Some(BlockHash([13; 32]));
+    Evidence::DoubleVote {
+        vote_a: Box::new(v1),
+        vote_b: Box::new(v2),
+    }
+}
+
 async fn get_free_port() -> SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     listener.local_addr().unwrap()
@@ -55,6 +90,9 @@ async fn test_serialization_variants() {
         NetworkMessage::BlockProposal(dummy_block()),
         dummy_vote(),
         NetworkMessage::TransactionGossip(dummy_tx()),
+        NetworkMessage::Proposal(dummy_proposal()),
+        NetworkMessage::ConsensusVote(dummy_consensus_vote()),
+        NetworkMessage::Evidence(dummy_evidence()),
         NetworkMessage::StatusRequest,
         NetworkMessage::StatusResponse {
             protocol_version: 1,
@@ -71,6 +109,9 @@ async fn test_serialization_variants() {
             (NetworkMessage::BlockProposal(_), NetworkMessage::BlockProposal(_)) => {}
             (NetworkMessage::Vote(..), NetworkMessage::Vote(..)) => {}
             (NetworkMessage::TransactionGossip(_), NetworkMessage::TransactionGossip(_)) => {}
+            (NetworkMessage::Proposal(_), NetworkMessage::Proposal(_)) => {}
+            (NetworkMessage::ConsensusVote(_), NetworkMessage::ConsensusVote(_)) => {}
+            (NetworkMessage::Evidence(_), NetworkMessage::Evidence(_)) => {}
             (NetworkMessage::StatusRequest, NetworkMessage::StatusRequest) => {}
             (NetworkMessage::StatusResponse { .. }, NetworkMessage::StatusResponse { .. }) => {}
             _ => panic!("Variant mismatch after serialization"),

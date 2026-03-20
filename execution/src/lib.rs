@@ -1,6 +1,6 @@
 use axiom_crypto::{
     compute_block_hash, sha256, verify_transaction_signature, verify_transaction_signature_for_height,
-    verify_vote, CryptoError,
+    verify_precommit, verify_vote, CryptoError,
 };
 use axiom_primitives::{
     serialize_block_canonical, AccountId, Block, BlockHash, ProtocolVersion, StakeAmount, StateHash,
@@ -355,22 +355,16 @@ fn apply_block_v2_inner(
         });
     }
 
-    let expected_proposer = select_proposer(previous_state, block.height)?;
+    let expected_proposer = select_proposer_v2(previous_state, staking_state, block.height, block.round)?;
     if block.proposer_id != expected_proposer {
-        let validator = previous_state.get_validator(&block.proposer_id).ok_or(
-            ExecutionError::UnknownValidator {
-                id: block.proposer_id,
-            },
-        )?;
-        if !validator.active {
-            return Err(ExecutionError::InactiveValidator {
-                id: block.proposer_id,
-            });
-        }
+        return Err(ExecutionError::InvalidProposer {
+            expected: expected_proposer,
+            got: block.proposer_id,
+        });
     }
 
     validate_block_limits(block)?;
-    verify_quorum(previous_state, block)?;
+    verify_quorum_v2(previous_state, staking_state, block)?;
 
     let mut new_state = previous_state.clone();
     let mut new_staking = staking_state.clone();
@@ -734,6 +728,67 @@ pub fn select_proposer(state: &State, height: u64) -> Result<ValidatorId, Execut
     Ok(*active[index].0)
 }
 
+fn effective_stake_for_height(
+    staking: &StakingState,
+    height: u64,
+    validator_id: &ValidatorId,
+) -> u64 {
+    if let Some(amount) = staking.stakes.get(validator_id) {
+        return amount.0;
+    }
+
+    if height == V2_ACTIVATION_HEIGHT && staking.is_empty() {
+        return V2_MIGRATION_STAKE_PER_VALIDATOR;
+    }
+
+    0
+}
+
+pub fn select_proposer_v2(
+    state: &State,
+    staking: &StakingState,
+    height: u64,
+    round: u64,
+) -> Result<ValidatorId, ExecutionError> {
+    let active = state.active_validators();
+    if active.is_empty() {
+        return Err(ExecutionError::NoActiveValidators);
+    }
+
+    let mut total_stake: u128 = 0;
+    for (vid, _) in &active {
+        total_stake = total_stake
+            .checked_add(effective_stake_for_height(staking, height, vid) as u128)
+            .ok_or(ExecutionError::Overflow)?;
+    }
+
+    if total_stake == 0 {
+        return Err(ExecutionError::NoActiveValidators);
+    }
+
+    let mut seed_bytes = Vec::with_capacity(16);
+    seed_bytes.extend_from_slice(&height.to_be_bytes());
+    seed_bytes.extend_from_slice(&round.to_be_bytes());
+    let digest = sha256(&seed_bytes);
+    let mut first8 = [0u8; 8];
+    first8.copy_from_slice(&digest[..8]);
+    let seed = u64::from_be_bytes(first8) as u128;
+    let index = seed % total_stake;
+
+    let mut cumulative: u128 = 0;
+    for (vid_ref, _) in active {
+        let vid = *vid_ref;
+        cumulative = cumulative
+            .checked_add(effective_stake_for_height(staking, height, &vid) as u128)
+            .ok_or(ExecutionError::Overflow)?;
+        if index < cumulative {
+            return Ok(vid);
+        }
+    }
+
+    Err(ExecutionError::Overflow)
+}
+
 pub fn select_fallback_proposer(
     state: &State,
     height: u64,
@@ -824,6 +879,71 @@ fn verify_quorum(state: &State, block: &Block) -> Result<(), ExecutionError> {
         return Err(ExecutionError::QuorumNotMet {
             collected: collected_power,
             required: (rhs / 3) + 1,
+        });
+    }
+
+    Ok(())
+}
+
+fn verify_quorum_v2(
+    state: &State,
+    staking: &StakingState,
+    block: &Block,
+) -> Result<(), ExecutionError> {
+    let active = state.active_validators();
+    if active.is_empty() {
+        return Err(ExecutionError::NoActiveValidators);
+    }
+
+    let mut total_stake: u128 = 0;
+    for (vid, _) in &active {
+        total_stake = total_stake
+            .checked_add(effective_stake_for_height(staking, block.height, vid) as u128)
+            .ok_or(ExecutionError::Overflow)?;
+    }
+    if total_stake == 0 {
+        return Err(ExecutionError::NoActiveValidators);
+    }
+
+    let mut collected_stake: u128 = 0;
+    let mut seen_validators = HashSet::new();
+    let block_hash = compute_block_hash(block);
+
+    for sig in &block.signatures {
+        if !seen_validators.insert(&sig.validator_id) {
+            return Err(ExecutionError::DuplicateSignature {
+                validator: sig.validator_id,
+            });
+        }
+
+        let validator = state
+            .get_validator(&sig.validator_id)
+            .ok_or(ExecutionError::UnknownValidator { id: sig.validator_id })?;
+
+        if !validator.active {
+            return Err(ExecutionError::InactiveValidator { id: sig.validator_id });
+        }
+
+        verify_precommit(
+            &sig.validator_id,
+            &block_hash,
+            block.height,
+            block.round,
+            &sig.signature,
+        )?;
+
+        collected_stake = collected_stake
+            .checked_add(effective_stake_for_height(staking, block.height, &sig.validator_id) as u128)
+            .ok_or(ExecutionError::Overflow)?;
+    }
+
+    if collected_stake * 3 <= total_stake * 2 {
+        let required = (total_stake * 2) / 3 + 1;
+        let required_u64 = u64::try_from(required).unwrap_or(u64::MAX);
+        let collected_u64 = u64::try_from(collected_stake).unwrap_or(u64::MAX);
+        return Err(ExecutionError::QuorumNotMet {
+            collected: collected_u64,
+            required: required_u64,
         });
     }
 
