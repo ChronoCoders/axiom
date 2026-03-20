@@ -20,6 +20,7 @@ pub enum NetworkMessage {
     TransactionGossip(Transaction),
     StatusRequest,
     StatusResponse {
+        protocol_version: u64,
         height: u64,
         genesis_hash: StateHash,
     },
@@ -35,6 +36,12 @@ pub struct NetworkConfig {
     pub retry_interval: Option<Duration>,
     /// Optional mapping from P2P peer address to that peer's API address.
     pub peer_api_map: HashMap<SocketAddr, SocketAddr>,
+    /// Local node's current committed height (best-effort; used only for status handshake).
+    pub local_height: u64,
+    /// Local node's genesis hash (network identity).
+    pub local_genesis_hash: StateHash,
+    /// Local node's protocol version (network identity).
+    pub local_protocol_version: u64,
 }
 
 /// Information about a connected peer.
@@ -105,6 +112,9 @@ impl Network {
             let mut shutdown_rx_peer = shutdown_rx.resubscribe();
             let peer_map_clone = Arc::clone(&peer_map);
             let api_addr = config.peer_api_map.get(&peer_addr).copied();
+            let local_height = config.local_height;
+            let local_genesis_hash = config.local_genesis_hash;
+            let local_protocol_version = config.local_protocol_version;
 
             tokio::spawn(async move {
                 info!("Starting connection manager for peer {}", peer_addr);
@@ -129,6 +139,23 @@ impl Network {
                     };
 
                     info!("Connected to peer {}", peer_addr);
+
+                    if let Err(e) =
+                        perform_handshake(
+                            &mut stream,
+                            local_protocol_version,
+                            local_height,
+                            local_genesis_hash,
+                        )
+                        .await
+                    {
+                        warn!("Handshake failed with {}: {}. Reconnecting...", peer_addr, e);
+                        tokio::select! {
+                            _ = tokio::time::sleep(retry_interval) => {},
+                            _ = shutdown_rx_peer.recv() => return,
+                        }
+                        continue;
+                    }
 
                     let now =
                         match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
@@ -156,6 +183,9 @@ impl Network {
                             msg_res = rx.recv() => {
                                 match msg_res {
                                     Ok(msg) => {
+                                         if matches!(msg, NetworkMessage::StatusRequest | NetworkMessage::StatusResponse { .. }) {
+                                            continue;
+                                         }
                                          let bytes = match bincode::serialize(&msg) {
                                             Ok(b) => b,
                                             Err(e) => {
@@ -205,6 +235,9 @@ impl Network {
         let bind_addr = config.bind_addr;
         let node_tx_clone = node_tx.clone();
         let mut shutdown_rx_listener = shutdown_rx.resubscribe();
+        let local_height = config.local_height;
+        let local_genesis_hash = config.local_genesis_hash;
+        let local_protocol_version = config.local_protocol_version;
 
         tokio::spawn(async move {
             let listener = match TcpListener::bind(bind_addr).await {
@@ -231,7 +264,15 @@ impl Network {
                                 info!("Accepted connection from {}", addr);
                                 let tx = node_tx_clone.clone();
                                 tokio::spawn(async move {
-                                    if let Err(e) = handle_incoming_connection(stream, tx).await {
+                                    if let Err(e) = handle_incoming_connection(
+                                        stream,
+                                        tx,
+                                        local_protocol_version,
+                                        local_height,
+                                        local_genesis_hash,
+                                    )
+                                    .await
+                                    {
                                         debug!("Connection closed with {}: {}", addr, e);
                                     }
                                 });
@@ -254,7 +295,13 @@ impl Network {
 async fn handle_incoming_connection(
     mut stream: TcpStream,
     tx: mpsc::Sender<NetworkMessage>,
+    local_protocol_version: u64,
+    local_height: u64,
+    local_genesis_hash: StateHash,
 ) -> std::io::Result<()> {
+    send_network_message(&mut stream, &NetworkMessage::StatusRequest).await?;
+    let mut verified = false;
+
     loop {
         // 1. Read Length (4 bytes)
         let mut len_buf = [0u8; 4];
@@ -280,9 +327,44 @@ async fn handle_incoming_connection(
         // 3. Deserialize
         match bincode::deserialize::<NetworkMessage>(&buf) {
             Ok(msg) => {
-                if let Err(e) = tx.send(msg).await {
-                    error!("Failed to forward message to node: {}", e);
-                    return Ok(());
+                match msg {
+                    NetworkMessage::StatusRequest => {
+                        let resp = NetworkMessage::StatusResponse {
+                            protocol_version: local_protocol_version,
+                            height: local_height,
+                            genesis_hash: local_genesis_hash,
+                        };
+                        send_network_message(&mut stream, &resp).await?;
+                    }
+                    NetworkMessage::StatusResponse {
+                        protocol_version,
+                        genesis_hash,
+                        ..
+                    } => {
+                        if protocol_version != local_protocol_version {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::PermissionDenied,
+                                "Peer protocol version mismatch",
+                            ));
+                        }
+                        if genesis_hash != local_genesis_hash {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::PermissionDenied,
+                                "Peer genesis mismatch",
+                            ));
+                        }
+                        verified = true;
+                    }
+                    other => {
+                        if !verified {
+                            debug!("Dropping message before handshake completes: {:?}", other);
+                            continue;
+                        }
+                        if let Err(e) = tx.send(other).await {
+                            error!("Failed to forward message to node: {}", e);
+                            return Ok(());
+                        }
+                    }
                 }
             }
             Err(e) => {
@@ -291,4 +373,83 @@ async fn handle_incoming_connection(
             }
         }
     }
+}
+
+async fn perform_handshake(
+    stream: &mut TcpStream,
+    local_protocol_version: u64,
+    local_height: u64,
+    local_genesis_hash: StateHash,
+) -> std::io::Result<()> {
+    send_network_message(stream, &NetworkMessage::StatusRequest).await?;
+
+    let mut remaining = Duration::from_secs(3);
+    let mut verified = false;
+
+    while !verified {
+        let start = std::time::Instant::now();
+        let msg = tokio::time::timeout(remaining, read_network_message(stream)).await??;
+        let elapsed = start.elapsed();
+        remaining = remaining.saturating_sub(elapsed);
+
+        match msg {
+            NetworkMessage::StatusRequest => {
+                let resp = NetworkMessage::StatusResponse {
+                    protocol_version: local_protocol_version,
+                    height: local_height,
+                    genesis_hash: local_genesis_hash,
+                };
+                send_network_message(stream, &resp).await?;
+            }
+            NetworkMessage::StatusResponse {
+                protocol_version,
+                genesis_hash,
+                ..
+            } => {
+                if protocol_version != local_protocol_version {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "Peer protocol version mismatch",
+                    ));
+                }
+                if genesis_hash != local_genesis_hash {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "Peer genesis mismatch",
+                    ));
+                }
+                verified = true;
+            }
+            other => {
+                debug!("Ignoring message during handshake: {:?}", other);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn send_network_message(stream: &mut TcpStream, msg: &NetworkMessage) -> std::io::Result<()> {
+    let bytes = bincode::serialize(msg)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let len = bytes.len() as u32;
+    stream.write_all(&len.to_be_bytes()).await?;
+    stream.write_all(&bytes).await?;
+    Ok(())
+}
+
+async fn read_network_message(stream: &mut TcpStream) -> std::io::Result<NetworkMessage> {
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf).await?;
+    let len = u32::from_be_bytes(len_buf) as usize;
+    if len > 10 * 1024 * 1024 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Message too large",
+        ));
+    }
+    let mut buf = vec![0u8; len];
+    stream.read_exact(&mut buf).await?;
+    bincode::deserialize::<NetworkMessage>(&buf)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }

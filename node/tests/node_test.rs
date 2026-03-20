@@ -169,7 +169,7 @@ impl TestNode {
             },
             logging: LoggingConfig {
                 level: "info".to_string(),
-                format: "text".to_string(),
+                format: "json".to_string(),
             },
             console: ConsoleConfig {
                 user: "operator".to_string(),

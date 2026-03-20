@@ -31,8 +31,17 @@ fn main() {
         // Save private key
         let key_filename = format!("validator_{i}.secret");
         let hex_key = hex::encode(priv_bytes);
-        let mut file = File::create(&key_filename).unwrap();
-        file.write_all(hex_key.as_bytes()).unwrap();
+        let mut file = match File::create(&key_filename) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Failed to create {key_filename}: {e}");
+                std::process::exit(1);
+            }
+        };
+        if let Err(e) = file.write_all(hex_key.as_bytes()) {
+            eprintln!("Failed to write {key_filename}: {e}");
+            std::process::exit(1);
+        }
         println!("Saved {key_filename}");
 
         let account_id = AccountId(pub_bytes);
@@ -63,10 +72,25 @@ fn main() {
         validators,
     };
 
-    let json = serde_json::to_string(&genesis).expect("Failed to serialize genesis");
+    let json = match serde_json::to_string(&genesis) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Failed to serialize genesis: {e}");
+            std::process::exit(1);
+        }
+    };
 
-    let mut file = File::create(&args.output).unwrap();
-    file.write_all(json.as_bytes()).unwrap();
+    let mut file = match File::create(&args.output) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Failed to create {:?}: {e}", args.output);
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = file.write_all(json.as_bytes()) {
+        eprintln!("Failed to write {:?}: {e}", args.output);
+        std::process::exit(1);
+    }
     println!("Saved genesis to {:?}", args.output);
 
     let hash = compute_genesis_hash(&genesis);

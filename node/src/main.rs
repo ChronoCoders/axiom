@@ -15,17 +15,20 @@ const LOCKED_GENESIS_HASH: &str =
 // Helper for shutdown signal
 async fn shutdown_signal() {
     let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
+        if let Err(e) = signal::ctrl_c().await {
+            eprintln!("Failed to install Ctrl+C handler: {e}");
+            std::process::exit(1);
+        }
     };
 
     #[cfg(unix)]
     let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
+        let mut sig =
+            signal::unix::signal(signal::unix::SignalKind::terminate()).unwrap_or_else(|e| {
+                eprintln!("Failed to install signal handler: {e}");
+                std::process::exit(1);
+            });
+        sig.recv().await;
     };
 
     #[cfg(not(unix))]
@@ -66,16 +69,16 @@ async fn main() {
         }
     };
 
-    let subscriber: Box<dyn tracing::Subscriber + Send + Sync> =
-        match config.logging.format.to_lowercase().as_str() {
-            "json" => Box::new(FmtSubscriber::builder().with_max_level(level).json().finish()),
-            "text" => Box::new(FmtSubscriber::builder().with_max_level(level).finish()),
-        other => {
-            eprintln!("Invalid logging.format: {other}");
-            std::process::exit(1);
-        }
-    };
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    if config.logging.format.to_lowercase() != "json" {
+        eprintln!("Invalid logging.format: {} (must be 'json')", config.logging.format);
+        std::process::exit(1);
+    }
+
+    let subscriber = FmtSubscriber::builder().with_max_level(level).json().finish();
+    if tracing::subscriber::set_global_default(subscriber).is_err() {
+        eprintln!("Failed to set global default subscriber");
+        std::process::exit(1);
+    }
 
     tracing::info!("Starting AXIOM Node (Binary): {}", config.node.node_id);
     tracing::info!("Protocol Version: {}", PROTOCOL_VERSION);

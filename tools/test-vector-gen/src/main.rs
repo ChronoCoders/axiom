@@ -16,6 +16,13 @@ const SEEDS: [&str; 4] = [
 ];
 
 fn main() {
+    if let Err(e) = run() {
+        eprintln!("{e}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== AXIOM Protocol v1 — Deterministic Test Vector Generation ===\n");
 
     let mut keys = Vec::new();
@@ -72,16 +79,19 @@ fn main() {
     println!("Genesis State Hash: {hash_hex}");
     println!();
 
-    let genesis_json = serde_json::to_string(&genesis).unwrap();
+    let genesis_json = serde_json::to_string(&genesis)?;
     println!("Genesis JSON (canonical):");
     println!("{genesis_json}");
     println!();
 
-    let state = State::from_genesis(&genesis).unwrap();
+    let state = State::from_genesis(&genesis)?;
 
     println!("--- Sorted Validator Order (BTreeMap) ---");
     for (i, (vid, val)) in state.active_validators().iter().enumerate() {
-        let label_idx = keys.iter().position(|(_, _, _, v)| v == *vid).unwrap();
+        let label_idx = keys
+            .iter()
+            .position(|(_, _, _, v)| v == *vid)
+            .ok_or("Failed to map validator id to seed label")?;
         let prefix = &to_hex(&vid.0)[..16];
         let num = label_idx + 1;
         let vp = val.voting_power;
@@ -92,8 +102,11 @@ fn main() {
 
     println!("--- Proposer Selection ---");
     for h in 1u64..=8 {
-        let proposer = select_proposer(&state, h).unwrap();
-        let label_idx = keys.iter().position(|(_, _, _, v)| *v == proposer).unwrap();
+        let proposer = select_proposer(&state, h)?;
+        let label_idx = keys
+            .iter()
+            .position(|(_, _, _, v)| *v == proposer)
+            .ok_or("Failed to map proposer id to seed label")?;
         let idx = h as usize % 4;
         let num = label_idx + 1;
         let prefix = &to_hex(&proposer.0)[..16];
@@ -102,7 +115,7 @@ fn main() {
     println!();
 
     println!("--- Quorum Parameters ---");
-    let total_power = state.total_voting_power().unwrap();
+    let total_power = state.total_voting_power()?;
     let double_total = total_power * 2;
     println!("  Total Voting Power: {total_power}");
     println!("  Quorum Rule: 3 * collected > 2 * total");
@@ -113,11 +126,11 @@ fn main() {
 
     println!("=== Block Vector 1: Empty Block at Height 1 ===\n");
 
-    let proposer_h1 = select_proposer(&state, 1).unwrap();
+    let proposer_h1 = select_proposer(&state, 1)?;
     let proposer_h1_idx = keys
         .iter()
         .position(|(_, _, _, v)| *v == proposer_h1)
-        .unwrap();
+        .ok_or("Failed to map proposer id at height 1")?;
     let p1_num = proposer_h1_idx + 1;
     println!("Proposer at height 1: Validator-{p1_num}");
 
@@ -126,7 +139,7 @@ fn main() {
     println!("Parent hash (genesis block hash placeholder): {parent_hex}");
 
     let (state_after_b1, state_hash_h1) =
-        axiom_execution::execute_proposal(&state, &[], &proposer_h1).unwrap();
+        axiom_execution::execute_proposal(&state, &[], &proposer_h1)?;
     let sh1_hex = to_hex(&state_hash_h1.0);
     println!("State hash after block 1: {sh1_hex}");
 
@@ -166,16 +179,16 @@ fn main() {
 
     println!("\n=== Block Vector 2: Empty Block at Height 2 ===\n");
 
-    let proposer_h2 = select_proposer(&state_after_b1, 2).unwrap();
+    let proposer_h2 = select_proposer(&state_after_b1, 2)?;
     let proposer_h2_idx = keys
         .iter()
         .position(|(_, _, _, v)| *v == proposer_h2)
-        .unwrap();
+        .ok_or("Failed to map proposer id at height 2")?;
     let p2_num = proposer_h2_idx + 1;
     println!("Proposer at height 2: Validator-{p2_num}");
 
     let (_, state_hash_h2_empty) =
-        axiom_execution::execute_proposal(&state_after_b1, &[], &proposer_h2).unwrap();
+        axiom_execution::execute_proposal(&state_after_b1, &[], &proposer_h2)?;
     let sh2e_hex = to_hex(&state_hash_h2_empty.0);
     println!("State hash after block 2 (empty): {sh2e_hex}");
 
@@ -239,7 +252,7 @@ fn main() {
         std::slice::from_ref(&tx1_signed),
         &proposer_h2,
     )
-    .unwrap();
+    ?;
     let sh2_hex = to_hex(&state_hash_h2.0);
     println!("\nState hash after block 2 (with transfer): {sh2_hex}");
     println!("  STATE_HASH_BLOCK_2 = {sh2_hex}");
@@ -268,11 +281,11 @@ fn main() {
     println!("  Seed (SHA-256): {}", to_hex(&account_e_seed));
     println!("  Public Key / Account ID: {ae_hex}");
 
-    let proposer_h3 = select_proposer(&state_after_b2, 3).unwrap();
+    let proposer_h3 = select_proposer(&state_after_b2, 3)?;
     let proposer_h3_idx = keys
         .iter()
         .position(|(_, _, _, v)| *v == proposer_h3)
-        .unwrap();
+        .ok_or("Failed to map proposer id at height 3")?;
     let p3_num = proposer_h3_idx + 1;
     println!("\nProposer at height 3: Validator-{p3_num}");
 
@@ -312,7 +325,7 @@ fn main() {
         std::slice::from_ref(&tx2_signed),
         &proposer_h3,
     )
-    .unwrap();
+    ?;
     let sh3_hex = to_hex(&state_hash_h3.0);
     println!("\nState hash after block 3 (with auto-create transfer): {sh3_hex}");
     println!("  STATE_HASH_BLOCK_3 = {sh3_hex}");
@@ -339,10 +352,9 @@ fn main() {
     let state_hash_verify = compute_state_hash(&state_after_b3);
     let verify_hex = to_hex(&state_hash_verify.0);
     println!("\n  State hash verification (recomputed): {verify_hex}");
-    assert_eq!(
-        state_hash_h3, state_hash_verify,
-        "State hash mismatch after block 3"
-    );
+    if state_hash_h3 != state_hash_verify {
+        return Err("State hash mismatch after block 3".into());
+    }
 
     println!("\n=== Transfer Vector (original) ===\n");
 
@@ -386,6 +398,7 @@ fn main() {
 
     println!("\n=== Reference genesis.json written to stdout above ===");
     println!("\n=== Generation Complete ===");
+    Ok(())
 }
 
 fn sorted_account_label(state: &State, account_id: &AccountId) -> String {

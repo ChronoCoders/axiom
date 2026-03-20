@@ -8,12 +8,14 @@ use std::fmt;
 use std::path::PathBuf;
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct NodeConfig {
     pub node_id: String,
     pub data_dir: PathBuf,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct NetworkConfig {
     pub enabled: bool,
     pub listen_address: String,
@@ -86,6 +88,7 @@ where
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct ApiConfig {
     pub enabled: bool,
     pub bind_address: String,
@@ -96,34 +99,40 @@ pub struct ApiConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct StorageConfig {
     pub sqlite_path: PathBuf,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct GenesisConfig {
     pub genesis_file: PathBuf,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct MempoolConfig {
     pub max_size: u64,
     pub max_tx_bytes: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct LoggingConfig {
     pub level: String,
     pub format: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct ConsoleConfig {
     pub user: String,
     pub password: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct AppConfig {
     pub node: NodeConfig,
     pub network: NetworkConfig,
@@ -137,6 +146,7 @@ pub struct AppConfig {
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ValidatorConfig {
     /// Validator private key (hex-encoded). Skipped during config file deserialization.
     /// Set programmatically for tests, or via AXIOM_VALIDATOR_PRIVATE_KEY env var at runtime.
@@ -186,9 +196,9 @@ impl AppConfig {
         if self.logging.level.is_empty() {
             return Err(ConfigError::Message("logging.level cannot be empty".to_string()));
         }
-        if self.logging.format.is_empty() {
+        if self.logging.format.to_lowercase() != "json" {
             return Err(ConfigError::Message(
-                "logging.format cannot be empty".to_string(),
+                "logging.format must be 'json'".to_string(),
             ));
         }
         if self.api.enabled && self.console.user.is_empty() {
@@ -265,7 +275,7 @@ impl AppConfig {
         let args = CliArgs::parse();
 
         let builder = Config::builder()
-            .add_source(File::from(args.config.clone()).required(false))
+            .add_source(File::from(args.config.clone()).required(true))
             .add_source(Environment::with_prefix("AXIOM").separator("__"));
 
         let mut builder = builder;
@@ -428,7 +438,7 @@ mod tests {
             max_tx_bytes = 65536
             [logging]
             level = "info"
-            format = "text"
+            format = "json"
             [console]
             user = "operator"
             password = "axiom"

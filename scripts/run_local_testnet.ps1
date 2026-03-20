@@ -100,7 +100,7 @@ max_tx_bytes = 65536
 
 [logging]
 level = "info"
-format = "text"
+format = "json"
 
 [console]
 user = "operator"

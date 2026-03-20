@@ -187,7 +187,7 @@ format = "json"
 | Field  | Description                                    | Required |
 |--------|------------------------------------------------|----------|
 | level  | Log verbosity (error, warn, info, debug, trace)| Yes |
-| format | Output format (text, json)                     | Yes |
+| format | Output format (json)                           | Yes |
 
 Rules:
 

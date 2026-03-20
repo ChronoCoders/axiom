@@ -171,11 +171,22 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
             }
         }
     }
+
+    let genesis_hash = match storage.get_genesis_hash() {
+        Ok(h) => h,
+        Err(e) => {
+            tracing::error!("Failed to load genesis hash for network identity: {e}");
+            return;
+        }
+    };
     let net_config = NetworkConfig {
         bind_addr,
         peers: peer_addrs,
         retry_interval: None,
         peer_api_map,
+        local_height: height,
+        local_genesis_hash: genesis_hash,
+        local_protocol_version: PROTOCOL_VERSION,
     };
 
     let (net_tx, mut net_rx, peer_map) =
@@ -558,6 +569,12 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                 .as_secs();
                             tracing::info!("Proposing block at height {}", next_height);
 
+                            let block_hash = compute_block_hash(&block);
+
+                            if let Err(e) = storage.save_pending_block(&block) {
+                                tracing::error!("Failed to save pending block: {}", e);
+                            }
+
                             // Broadcast Proposal
                             let net_tx_clone = net_tx.clone();
                             let block_clone = block.clone();
@@ -570,11 +587,14 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                 }
                             });
 
-                            let block_hash = compute_block_hash(&block);
-
                             // Broadcast our Vote
                             // construct_block already adds our signature to block.signatures
                             if let Some(sig) = block.signatures.first() {
+                                let sig_str = hex::encode(sig.signature.0);
+                                if let Err(e) = storage.save_own_vote(next_height, &block_hash, &sig_str) {
+                                    tracing::error!("Failed to save own vote: {}", e);
+                                }
+
                                 let vote_msg =
                                     NetworkMessage::Vote(sig.clone(), block_hash, next_height);
                                 let net_tx_clone2 = net_tx.clone();

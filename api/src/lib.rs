@@ -258,7 +258,11 @@ async fn list_blocks(
         )
     })?;
 
-    let start_height = params.cursor.unwrap_or(latest_height);
+    let start_height = match params.cursor {
+        Some(0) => return Ok(Json(Vec::new())),
+        Some(c) => std::cmp::min(c.saturating_sub(1), latest_height),
+        None => latest_height,
+    };
     let mut blocks = Vec::new();
 
     // Iterate backwards from start_height

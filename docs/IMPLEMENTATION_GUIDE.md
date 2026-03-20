@@ -611,7 +611,7 @@ pub enum NetworkMessage {
     Vote(ValidatorSignature, BlockHash, u64), // sig, block_hash, height
     TransactionGossip(Transaction),
     StatusRequest,
-    StatusResponse { height: u64, genesis_hash: StateHash },
+    StatusResponse { protocol_version: u64, height: u64, genesis_hash: StateHash },
 }
 ```
 

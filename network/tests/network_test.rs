@@ -55,6 +55,7 @@ async fn test_serialization_variants() {
         NetworkMessage::TransactionGossip(dummy_tx()),
         NetworkMessage::StatusRequest,
         NetworkMessage::StatusResponse {
+            protocol_version: 1,
             height: 5,
             genesis_hash: StateHash([9; 32]),
         },
@@ -91,6 +92,9 @@ async fn test_peer_unavailable() {
         peers: vec![closed_peer_addr],
         retry_interval: Some(Duration::from_millis(100)),
         peer_api_map: std::collections::HashMap::new(),
+        local_height: 0,
+        local_genesis_hash: StateHash([9; 32]),
+        local_protocol_version: 1,
     };
 
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
@@ -108,6 +112,7 @@ async fn test_peer_unavailable() {
 async fn test_peer_reconnection() {
     let addr_a = get_free_port().await;
     let addr_b = get_free_port().await;
+    let genesis_hash = StateHash([9; 32]);
 
     // Config for Node A: connects to B, with retry
     let config_a = NetworkConfig {
@@ -115,6 +120,9 @@ async fn test_peer_reconnection() {
         peers: vec![addr_b],
         retry_interval: Some(Duration::from_millis(100)),
         peer_api_map: std::collections::HashMap::new(),
+        local_height: 0,
+        local_genesis_hash: genesis_hash,
+        local_protocol_version: 1,
     };
 
     // Config for Node B: listens
@@ -123,6 +131,9 @@ async fn test_peer_reconnection() {
         peers: vec![],
         retry_interval: None,
         peer_api_map: std::collections::HashMap::new(),
+        local_height: 0,
+        local_genesis_hash: genesis_hash,
+        local_protocol_version: 1,
     };
 
     // Start Node A
@@ -162,6 +173,7 @@ async fn test_3_node_communication() {
     let addr_a = get_free_port().await;
     let addr_b = get_free_port().await;
     let addr_c = get_free_port().await;
+    let genesis_hash = StateHash([9; 32]);
 
     // A knows B, B knows C, C knows A (Ring)
     let config_a = NetworkConfig {
@@ -169,18 +181,27 @@ async fn test_3_node_communication() {
         peers: vec![addr_b],
         retry_interval: Some(Duration::from_millis(100)),
         peer_api_map: std::collections::HashMap::new(),
+        local_height: 0,
+        local_genesis_hash: genesis_hash,
+        local_protocol_version: 1,
     };
     let config_b = NetworkConfig {
         bind_addr: addr_b,
         peers: vec![addr_c],
         retry_interval: Some(Duration::from_millis(100)),
         peer_api_map: std::collections::HashMap::new(),
+        local_height: 0,
+        local_genesis_hash: genesis_hash,
+        local_protocol_version: 1,
     };
     let config_c = NetworkConfig {
         bind_addr: addr_c,
         peers: vec![addr_a],
         retry_interval: Some(Duration::from_millis(100)),
         peer_api_map: std::collections::HashMap::new(),
+        local_height: 0,
+        local_genesis_hash: genesis_hash,
+        local_protocol_version: 1,
     };
 
     let (shutdown_tx_a, shutdown_rx_a) = broadcast::channel(1);
