@@ -12,6 +12,8 @@ fn dummy_block() -> Block {
         parent_hash: BlockHash([0; 32]),
         height: 1,
         epoch: 1,
+        protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+        round: 0,
         proposer_id: ValidatorId([1; 32]),
         transactions: vec![],
         signatures: vec![],

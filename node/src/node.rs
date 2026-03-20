@@ -5,7 +5,8 @@ use axiom_execution::{compute_state_hash, select_fallback_proposer, select_propo
 use axiom_mempool::Mempool;
 use axiom_network::{Network, NetworkConfig, NetworkMessage};
 use axiom_primitives::{
-    Block, BlockHash, PublicKey, Signature, ValidatorId, ValidatorSignature, PROTOCOL_VERSION,
+    Block, BlockHash, ProtocolVersion, PublicKey, Signature, ValidatorId, ValidatorSignature,
+    PROTOCOL_VERSION,
 };
 use axiom_storage::Storage;
 use axum_server::tls_rustls::RustlsConfig;
@@ -87,6 +88,8 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                 parent_hash: BlockHash([0; 32]),
                 height: 0,
                 epoch: 0,
+                protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+                round: 0,
                 proposer_id: ValidatorId([0; 32]), // Null proposer for genesis
                 transactions: vec![],
                 signatures: vec![],
@@ -107,7 +110,16 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
         }
     };
 
+    let staking = match storage.load_staking_state() {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("Failed to load staking state: {e}");
+            return;
+        }
+    };
+
     let state = Arc::new(Mutex::new(initial_state));
+    let staking_state = Arc::new(Mutex::new(staking));
     let current_height = Arc::new(AtomicUsize::new(height as usize));
 
     // 4. Initialize Mempool
@@ -186,7 +198,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
         peer_api_map,
         local_height: height,
         local_genesis_hash: genesis_hash,
-        local_protocol_version: PROTOCOL_VERSION,
+        local_protocol_version: ProtocolVersion::for_height(height).as_u64(),
     };
 
     let (net_tx, mut net_rx, peer_map) =
@@ -561,7 +573,22 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
 
                     // Construct
                     // REMOVED: let state_guard = state.lock().unwrap(); // Avoid deadlock, reuse outer guard
-                    match construct_block(&state_guard, next_height, parent_hash, txs, sk, val_id) {
+                    let staking_guard = match staking_state.lock() {
+                        Ok(g) => g,
+                        Err(e) => {
+                            tracing::error!("Staking lock poisoned: {e}");
+                            continue;
+                        }
+                    };
+                    match construct_block(
+                        &state_guard,
+                        &staking_guard,
+                        next_height,
+                        parent_hash,
+                        txs,
+                        sk,
+                        val_id,
+                    ) {
                         Ok(mut block) => {
                             block.timestamp = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
@@ -696,21 +723,34 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                         let parent_hash = compute_block_hash(&parent_block);
 
                         // Commit
+                        let mut staking_guard = match staking_state.lock() {
+                            Ok(g) => g,
+                            Err(e) => {
+                                tracing::error!("Staking lock poisoned: {e}");
+                                break;
+                            }
+                        };
                         match validate_and_commit_block(
                             &state_guard,
+                            &staking_guard,
                             &final_block,
                             &parent_hash,
                             height,
                         ) {
-                            Ok(new_state) => {
+                            Ok((new_state, new_staking)) => {
                                 tracing::info!(
                                     "Block {} committed successfully.",
                                     final_block.height
                                 );
-                                match storage.commit_block(&final_block, &new_state) {
+                                let commit_res = match ProtocolVersion::for_height(final_block.height) {
+                                    ProtocolVersion::V1 => storage.commit_block(&final_block, &new_state),
+                                    ProtocolVersion::V2 => storage.commit_block_v2(&final_block, &new_state, &new_staking),
+                                };
+                                match commit_res {
                                     Ok(_) => {
                                         // Update State
                                         *state_guard = new_state;
+                                        *staking_guard = new_staking;
 
                                         // Update Mempool
                                         let mut mempool_guard = match mempool.lock() {
@@ -723,7 +763,12 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                         let tx_hashes: Vec<_> = final_block
                                             .transactions
                                             .iter()
-                                            .map(axiom_crypto::compute_transaction_hash)
+                                            .map(|tx| {
+                                                axiom_crypto::compute_transaction_hash_for_height(
+                                                    final_block.height,
+                                                    tx,
+                                                )
+                                            })
                                             .collect();
                                         mempool_guard.remove_batch(&tx_hashes);
 
@@ -737,6 +782,9 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                             if loaded_height >= next_height {
                                                 tracing::warn!("Storage is ahead (Height: {}). Updating state.", loaded_height);
                                                 *state_guard = loaded_state;
+                                                if let Ok(loaded_staking) = storage.load_staking_state() {
+                                                    *staking_guard = loaded_staking;
+                                                }
                                                 current_height.store(
                                                     loaded_height as usize,
                                                     std::sync::atomic::Ordering::SeqCst,

@@ -1,7 +1,7 @@
 use axiom_primitives::{
-    serialize_block_canonical, serialize_string, serialize_transaction_canonical, serialize_u64,
-    to_hex, Block, BlockHash, GenesisConfig, PublicKey, Signature, StateHash, Transaction,
-    TransactionHash,
+    serialize_block_canonical, serialize_string, serialize_transaction_canonical_v1,
+    serialize_transaction_canonical_v2, serialize_u64, to_hex, Block, BlockHash, GenesisConfig,
+    ProtocolVersion, PublicKey, Signature, StateHash, Transaction, TransactionHash,
 };
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
@@ -45,8 +45,20 @@ pub fn compute_block_hash(block: &Block) -> BlockHash {
 
 /// Computes hash of a transaction
 pub fn compute_transaction_hash(tx: &Transaction) -> TransactionHash {
-    let bytes = serialize_transaction_canonical(tx);
+    let bytes = serialize_transaction_canonical_v1(tx);
     TransactionHash(sha256(&bytes))
+}
+
+pub fn compute_transaction_hash_v2(tx: &Transaction) -> TransactionHash {
+    let bytes = serialize_transaction_canonical_v2(tx);
+    TransactionHash(sha256(&bytes))
+}
+
+pub fn compute_transaction_hash_for_height(height: u64, tx: &Transaction) -> TransactionHash {
+    match ProtocolVersion::for_height(height) {
+        ProtocolVersion::V1 => compute_transaction_hash(tx),
+        ProtocolVersion::V2 => compute_transaction_hash_v2(tx),
+    }
 }
 
 /// Computes the initial state hash from genesis config
@@ -101,15 +113,28 @@ pub fn compute_genesis_hash(genesis: &GenesisConfig) -> StateHash {
 
 /// Signs a transaction
 pub fn sign_transaction(private_key: &PrivateKey, tx: &Transaction) -> Signature {
-    let bytes = serialize_transaction_canonical(tx);
+    let bytes = serialize_transaction_canonical_v1(tx);
     // ed25519-dalek returns a Signature struct, we need [u8; 64]
     let sig = private_key.sign(&bytes);
     Signature(sig.to_bytes())
 }
 
+pub fn sign_transaction_v2(private_key: &PrivateKey, tx: &Transaction) -> Signature {
+    let bytes = serialize_transaction_canonical_v2(tx);
+    let sig = private_key.sign(&bytes);
+    Signature(sig.to_bytes())
+}
+
+pub fn sign_transaction_for_height(height: u64, private_key: &PrivateKey, tx: &Transaction) -> Signature {
+    match ProtocolVersion::for_height(height) {
+        ProtocolVersion::V1 => sign_transaction(private_key, tx),
+        ProtocolVersion::V2 => sign_transaction_v2(private_key, tx),
+    }
+}
+
 /// Verifies a transaction signature
 pub fn verify_transaction_signature(tx: &Transaction) -> Result<(), CryptoError> {
-    let bytes = serialize_transaction_canonical(tx);
+    let bytes = serialize_transaction_canonical_v1(tx);
     let public_key_bytes = tx.sender.0;
 
     let verifying_key =
@@ -120,6 +145,27 @@ pub fn verify_transaction_signature(tx: &Transaction) -> Result<(), CryptoError>
     verifying_key
         .verify(&bytes, &signature)
         .map_err(|_| CryptoError::InvalidSignature)
+}
+
+pub fn verify_transaction_signature_v2(tx: &Transaction) -> Result<(), CryptoError> {
+    let bytes = serialize_transaction_canonical_v2(tx);
+    let public_key_bytes = tx.sender.0;
+
+    let verifying_key =
+        VerifyingKey::from_bytes(&public_key_bytes).map_err(|_| CryptoError::InvalidPublicKey)?;
+
+    let signature = ed25519_dalek::Signature::from_bytes(&tx.signature.0);
+
+    verifying_key
+        .verify(&bytes, &signature)
+        .map_err(|_| CryptoError::InvalidSignature)
+}
+
+pub fn verify_transaction_signature_for_height(height: u64, tx: &Transaction) -> Result<(), CryptoError> {
+    match ProtocolVersion::for_height(height) {
+        ProtocolVersion::V1 => verify_transaction_signature(tx),
+        ProtocolVersion::V2 => verify_transaction_signature_v2(tx),
+    }
 }
 
 // Vote signing (PROTOCOL.md Section 8.4)

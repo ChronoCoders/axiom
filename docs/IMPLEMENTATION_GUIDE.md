@@ -423,15 +423,23 @@ This crate needs the most comprehensive tests:
 pub fn select_proposer(state: &State, height: u64) -> Result<ValidatorId, ConsensusError>;
 
 // Block validation (wraps execution)
-pub fn validate_and_commit_block(state: &State, block: &Block) -> Result<State, ConsensusError>;
+pub fn validate_and_commit_block(
+    state: &State,
+    staking_state: &StakingState,
+    block: &Block,
+    parent_hash: &BlockHash,
+    parent_height: u64,
+) -> Result<(State, StakingState), ConsensusError>;
 
 // For proposer nodes: construct a block
 pub fn construct_block(
     state: &State,
+    staking_state: &StakingState,
     height: u64,
     parent_hash: BlockHash,
     transactions: Vec<Transaction>,
     proposer_key: &PrivateKey,
+    proposer_id: &ValidatorId,
 ) -> Result<Block, ConsensusError>;
 ```
 

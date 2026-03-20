@@ -72,29 +72,42 @@ impl StakingState {
         self.stakes.is_empty() && self.unbonding_queue.is_empty()
     }
 
+    pub fn serialize_staking_canonical(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+
+        serialize_u64(self.minimum_stake, &mut buf);
+        serialize_u64(self.unbonding_period, &mut buf);
+
+        let stakes_len = self.stakes.len() as u32;
+        buf.extend_from_slice(&stakes_len.to_be_bytes());
+        for (vid, amount) in &self.stakes {
+            serialize_string(&to_hex(&vid.0), &mut buf);
+            serialize_u64(amount.0, &mut buf);
+        }
+
+        let queue_len = self.unbonding_queue.len() as u32;
+        buf.extend_from_slice(&queue_len.to_be_bytes());
+        for entry in &self.unbonding_queue {
+            serialize_string(&to_hex(&entry.validator_id.0), &mut buf);
+            serialize_u64(entry.amount.0, &mut buf);
+            serialize_u64(entry.release_height, &mut buf);
+        }
+
+        buf
+    }
+
     /// Applies a stake operation. The caller must have already validated that
     /// the account has sufficient balance and deducted it.
-    /// Returns an error if the amount is below the minimum stake or
-    /// if the account already has an active stake.
     pub fn apply_stake(
         &mut self,
         validator_id: ValidatorId,
         amount: StakeAmount,
     ) -> Result<(), StateError> {
-        if amount.0 < self.minimum_stake {
-            return Err(StateError::StakeBelowMinimum {
-                amount: amount.0,
-                minimum: self.minimum_stake,
-            });
-        }
-
-        if self.stakes.contains_key(&validator_id) {
-            return Err(StateError::AlreadyStaked {
-                account: validator_id,
-            });
-        }
-
-        self.stakes.insert(validator_id, amount);
+        let existing = self.stakes.get(&validator_id).map(|a| a.0).unwrap_or(0);
+        let new_amount = existing
+            .checked_add(amount.0)
+            .ok_or(StateError::Overflow)?;
+        self.stakes.insert(validator_id, StakeAmount(new_amount));
         Ok(())
     }
 
@@ -243,12 +256,6 @@ pub enum StateError {
 
     #[error("Arithmetic overflow")]
     Overflow,
-
-    #[error("Stake amount {amount} below minimum {minimum}")]
-    StakeBelowMinimum { amount: u64, minimum: u64 },
-
-    #[error("Account {account} already has an active stake")]
-    AlreadyStaked { account: ValidatorId },
 
     #[error("No active stake for account {account}")]
     NoActiveStake { account: ValidatorId },
@@ -881,25 +888,17 @@ mod tests {
     fn test_apply_stake_success() {
         let mut ss = StakingState::new_active();
         let vid = mock_validator_id(1);
-        ss.apply_stake(vid, StakeAmount(100_000)).unwrap();
-        assert_eq!(ss.stakes.get(&vid).unwrap().0, 100_000);
+        ss.apply_stake(vid, StakeAmount(1)).unwrap();
+        assert_eq!(ss.stakes.get(&vid).unwrap().0, 1);
     }
 
     #[test]
-    fn test_apply_stake_below_minimum() {
+    fn test_apply_stake_additive() {
         let mut ss = StakingState::new_active();
         let vid = mock_validator_id(1);
-        let res = ss.apply_stake(vid, StakeAmount(99_999));
-        assert!(matches!(res, Err(StateError::StakeBelowMinimum { .. })));
-    }
-
-    #[test]
-    fn test_apply_stake_already_staked() {
-        let mut ss = StakingState::new_active();
-        let vid = mock_validator_id(1);
-        ss.apply_stake(vid, StakeAmount(100_000)).unwrap();
-        let res = ss.apply_stake(vid, StakeAmount(100_000));
-        assert!(matches!(res, Err(StateError::AlreadyStaked { .. })));
+        ss.apply_stake(vid, StakeAmount(1)).unwrap();
+        ss.apply_stake(vid, StakeAmount(2)).unwrap();
+        assert_eq!(ss.stakes.get(&vid).unwrap().0, 3);
     }
 
     #[test]

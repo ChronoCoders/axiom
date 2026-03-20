@@ -56,6 +56,8 @@ fn test_staking_state_storage_roundtrip() {
         parent_hash: BlockHash([0u8; 32]),
         height: 10_000,
         epoch: 0,
+        protocol_version: axiom_primitives::PROTOCOL_VERSION_V2,
+        round: 0,
         proposer_id: val_id,
         transactions: vec![],
         signatures: vec![ValidatorSignature {

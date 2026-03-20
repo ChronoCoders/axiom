@@ -1,9 +1,9 @@
-use axiom_crypto::{compute_transaction_hash, verify_transaction_signature};
+use axiom_crypto::{compute_transaction_hash_for_height, verify_transaction_signature_for_height};
 use axiom_mempool::Mempool;
 use axiom_network::PeerMap;
 use axiom_primitives::{
-    serialize_transaction_canonical, AccountId, BlockHash, Transaction, ValidatorSignature,
-    PROTOCOL_VERSION,
+    serialize_transaction_canonical_v1, serialize_transaction_canonical_v2, AccountId, BlockHash,
+    ProtocolVersion, Transaction, TransactionType, ValidatorId, ValidatorSignature, PROTOCOL_VERSION,
 };
 use axiom_storage::Storage;
 use axum::{
@@ -561,7 +561,29 @@ async fn submit_transaction(
     State(state): State<Arc<AppState>>,
     Json(tx): Json<Transaction>,
 ) -> Result<(StatusCode, Json<SubmitTransactionResponse>), (StatusCode, Json<ApiError>)> {
-    let tx_bytes = serialize_transaction_canonical(&tx);
+    let latest_height = state.storage.get_latest_height().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new(e.to_string(), "storage_error")),
+        )
+    })?;
+    let next_height = latest_height.saturating_add(1);
+    let version = ProtocolVersion::for_height(next_height);
+
+    if version == ProtocolVersion::V1 && tx.tx_type != TransactionType::Transfer {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "Only Transfer transactions are allowed before v2 activation",
+                "v2_tx_in_v1",
+            )),
+        ));
+    }
+
+    let tx_bytes = match version {
+        ProtocolVersion::V1 => serialize_transaction_canonical_v1(&tx),
+        ProtocolVersion::V2 => serialize_transaction_canonical_v2(&tx),
+    };
     if tx_bytes.len() > state.max_tx_bytes {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -577,7 +599,7 @@ async fn submit_transaction(
     }
 
     // 1. Verify Signature
-    if verify_transaction_signature(&tx).is_err() {
+    if verify_transaction_signature_for_height(next_height, &tx).is_err() {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ApiError::new("Invalid signature", "invalid_signature")),
@@ -632,6 +654,60 @@ async fn submit_transaction(
         ));
     }
 
+    if version == ProtocolVersion::V2 && (tx.tx_type == TransactionType::Stake || tx.tx_type == TransactionType::Unstake) {
+        let vid = ValidatorId(tx.sender.0);
+        let validator = state.storage.get_validator(&vid).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError::new(e.to_string(), "storage_error")),
+            )
+        })?;
+
+        let Some(v) = validator else {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ApiError::new("Sender is not a validator", "not_validator")),
+            ));
+        };
+
+        if v.account_id != tx.sender {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ApiError::new(
+                    "Sender is not the validator's associated account",
+                    "not_validator_account",
+                )),
+            ));
+        }
+
+        if tx.tx_type == TransactionType::Unstake {
+            let staking = state.storage.load_staking_state().map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiError::new(e.to_string(), "storage_error")),
+                )
+            })?;
+
+            let effective_stake = if next_height == axiom_primitives::V2_ACTIVATION_HEIGHT
+                && staking.is_empty()
+            {
+                axiom_primitives::V2_MIGRATION_STAKE_PER_VALIDATOR
+            } else {
+                staking.stakes.get(&vid).map(|a| a.0).unwrap_or(0)
+            };
+
+            if effective_stake < tx.amount {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiError::new(
+                        "Insufficient staked amount",
+                        "insufficient_stake",
+                    )),
+                ));
+            }
+        }
+    }
+
     // 4. Add to Mempool
     let mut mempool = state.mempool.lock().map_err(|_| {
         (
@@ -639,9 +715,9 @@ async fn submit_transaction(
             Json(ApiError::new("Internal lock error", "internal_error")),
         )
     })?;
-    match mempool.add(tx.clone()) {
+    match mempool.add_for_height(next_height, tx.clone()) {
         Ok(_) => {
-            let hash = compute_transaction_hash(&tx);
+            let hash = compute_transaction_hash_for_height(next_height, &tx);
             Ok((
                 StatusCode::ACCEPTED,
                 Json(SubmitTransactionResponse {
@@ -652,7 +728,7 @@ async fn submit_transaction(
         }
         Err(axiom_mempool::MempoolError::Duplicate) => {
             // Idempotent success
-            let hash = compute_transaction_hash(&tx);
+            let hash = compute_transaction_hash_for_height(next_height, &tx);
             Ok((
                 StatusCode::ACCEPTED,
                 Json(SubmitTransactionResponse {

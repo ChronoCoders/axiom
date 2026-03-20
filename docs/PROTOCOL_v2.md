@@ -70,6 +70,10 @@ Validation:
 - Signature valid
 - Sender is a registered validator's associated account
 
+Signature rule:
+
+- The signature is computed over the canonical transaction serialization starting with a 1-byte `tx_type` prefix.
+
 Execution:
 
 - Sender balance decreased by amount
@@ -121,7 +125,8 @@ This is automatic and does not require a transaction.
 
 At the activation height:
 
-- All existing v1 validators receive an initial stake equal to their voting power (or a protocol-defined migration amount)
+- All existing v1 validators receive an initial stake equal to the protocol-defined migration amount `V2_MIGRATION_STAKE_PER_VALIDATOR = MIN_VALIDATOR_STAKE`.
+- The migration stake is deducted from each validator’s associated account balance and credited into that validator’s stake entry (preserving total_supply invariants).
 - minimum_stake is set to the protocol-defined constant
 - unbonding_period is set to the protocol-defined constant
 - The migration is applied as part of the activation block's state transition

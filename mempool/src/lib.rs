@@ -1,4 +1,4 @@
-use axiom_crypto::compute_transaction_hash;
+use axiom_crypto::compute_transaction_hash_for_height;
 use axiom_primitives::{Transaction, TransactionHash};
 use std::collections::{HashMap, VecDeque};
 use thiserror::Error;
@@ -34,7 +34,23 @@ impl Mempool {
     ///
     /// Returns error if full or duplicate.
     pub fn add(&mut self, tx: Transaction) -> Result<(), MempoolError> {
-        let hash = compute_transaction_hash(&tx);
+        let hash = compute_transaction_hash_for_height(0, &tx);
+
+        if self.transactions.contains_key(&hash) {
+            return Err(MempoolError::Duplicate);
+        }
+
+        if self.transactions.len() >= self.capacity {
+            return Err(MempoolError::Full);
+        }
+
+        self.transactions.insert(hash, tx);
+        self.queue.push_back(hash);
+        Ok(())
+    }
+
+    pub fn add_for_height(&mut self, height: u64, tx: Transaction) -> Result<(), MempoolError> {
+        let hash = compute_transaction_hash_for_height(height, &tx);
 
         if self.transactions.contains_key(&hash) {
             return Err(MempoolError::Duplicate);
@@ -85,7 +101,7 @@ impl Mempool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_crypto::{compute_transaction_hash, sign_transaction, test_keypair};
+    use axiom_crypto::{compute_transaction_hash_for_height, sign_transaction, test_keypair};
     use axiom_primitives::{AccountId, Signature, Transaction, TransactionHash, TransactionType};
 
     fn create_dummy_tx(nonce: u64) -> Transaction {
@@ -145,12 +161,12 @@ mod tests {
 
         let batch = pool.get_batch(2);
         assert_eq!(
-            compute_transaction_hash(&batch[0]),
-            compute_transaction_hash(&tx1)
+            compute_transaction_hash_for_height(0, &batch[0]),
+            compute_transaction_hash_for_height(0, &tx1)
         );
         assert_eq!(
-            compute_transaction_hash(&batch[1]),
-            compute_transaction_hash(&tx2)
+            compute_transaction_hash_for_height(0, &batch[1]),
+            compute_transaction_hash_for_height(0, &tx2)
         );
     }
 
@@ -159,7 +175,7 @@ mod tests {
         let mut pool = Mempool::new(10);
         let tx1 = create_dummy_tx(1);
         let tx2 = create_dummy_tx(2);
-        let hash1 = compute_transaction_hash(&tx1);
+        let hash1 = compute_transaction_hash_for_height(0, &tx1);
 
         pool.add(tx1).unwrap();
         pool.add(tx2).unwrap();

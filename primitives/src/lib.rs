@@ -11,10 +11,13 @@ pub const MAX_BLOCK_SIZE_BYTES: usize = 1_048_576; // 1 MB
 // Protocol v2 constants (compile-time, deterministic, integer-only)
 pub const PROTOCOL_V1_VERSION: u64 = 1;
 pub const PROTOCOL_V2_VERSION: u64 = 2;
+pub const PROTOCOL_VERSION_V1: u64 = PROTOCOL_V1_VERSION;
+pub const PROTOCOL_VERSION_V2: u64 = PROTOCOL_V2_VERSION;
 pub const V2_ACTIVATION_HEIGHT: u64 = 10_000;
 pub const MIN_VALIDATOR_STAKE: u64 = 100_000;
 pub const UNBONDING_PERIOD: u64 = 1_000;
 pub const SLASH_PERCENTAGE: u64 = 10;
+pub const V2_MIGRATION_STAKE_PER_VALIDATOR: u64 = MIN_VALIDATOR_STAKE;
 
 /// Protocol version derived deterministically from block height.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -129,10 +132,12 @@ impl fmt::Display for Round {
 
 /// Vote type in round-based BFT consensus (v2 scaffolding).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum VoteType {
+pub enum VotePhase {
     Prevote,
     Precommit,
 }
+
+pub type VoteType = VotePhase;
 
 // Core identifiers
 
@@ -144,6 +149,13 @@ pub struct ValidatorId(pub [u8; 32]); // Same as AccountId
 
 #[derive(Clone, Copy, PartialOrd, Ord)]
 pub struct BlockHash(pub [u8; 32]); // SHA-256 output
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LockState {
+    pub height: u64,
+    pub round: u64,
+    pub block_hash: Option<BlockHash>,
+}
 
 #[derive(Clone, Copy, PartialOrd, Ord)]
 pub struct StateHash(pub [u8; 32]); // SHA-256 output
@@ -486,6 +498,10 @@ pub struct Block {
     pub parent_hash: BlockHash,
     pub height: u64,
     pub epoch: u64,
+    #[serde(default = "default_protocol_version")]
+    pub protocol_version: u64,
+    #[serde(default)]
+    pub round: u64,
     pub proposer_id: ValidatorId,
     pub transactions: Vec<Transaction>,
     pub signatures: Vec<ValidatorSignature>,
@@ -494,6 +510,10 @@ pub struct Block {
     /// Not included in canonical serialization — treated as metadata only.
     #[serde(default)]
     pub timestamp: u64,
+}
+
+fn default_protocol_version() -> u64 {
+    PROTOCOL_VERSION_V1
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -512,6 +532,37 @@ pub struct Transaction {
     pub signature: Signature,
     #[serde(default)]
     pub tx_type: TransactionType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Vote {
+    pub height: u64,
+    pub round: u64,
+    pub phase: VotePhase,
+    pub block_hash: Option<BlockHash>,
+    pub validator_id: ValidatorId,
+    pub signature: Signature,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Proposal {
+    pub height: u64,
+    pub round: u64,
+    pub block: Block,
+    pub proposer_id: ValidatorId,
+    pub signature: Signature,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Evidence {
+    DoublePropose {
+        proposal_a: Box<Proposal>,
+        proposal_b: Box<Proposal>,
+    },
+    DoubleVote {
+        vote_a: Box<Vote>,
+        vote_b: Box<Vote>,
+    },
 }
 
 // Genesis structure (for JSON deserialization)
@@ -597,13 +648,22 @@ pub fn serialize_block_canonical(block: &Block) -> Vec<u8> {
     serialize_u64(block.height, &mut buf);
     // 3. epoch (u64 big-endian)
     serialize_u64(block.epoch, &mut buf);
+    if block.protocol_version == PROTOCOL_VERSION_V2 {
+        // v2 block header extension
+        serialize_u64(block.protocol_version, &mut buf);
+        serialize_u64(block.round, &mut buf);
+    }
     // 4. proposer_id (length-prefixed hex string)
     serialize_string(&to_hex(&block.proposer_id.0), &mut buf);
     // 5. transactions (count-prefixed list of canonical transactions)
     let tx_count = block.transactions.len() as u32;
     buf.extend_from_slice(&tx_count.to_be_bytes());
     for tx in &block.transactions {
-        buf.extend(serialize_transaction_canonical(tx));
+        if block.protocol_version == PROTOCOL_VERSION_V2 {
+            buf.extend(serialize_transaction_canonical_v2(tx));
+        } else {
+            buf.extend(serialize_transaction_canonical_v1(tx));
+        }
     }
     // 6. state_hash (32 bytes raw)
     buf.extend_from_slice(&block.state_hash.0);
@@ -612,6 +672,10 @@ pub fn serialize_block_canonical(block: &Block) -> Vec<u8> {
 }
 
 pub fn serialize_transaction_canonical(tx: &Transaction) -> Vec<u8> {
+    serialize_transaction_canonical_v1(tx)
+}
+
+pub fn serialize_transaction_canonical_v1(tx: &Transaction) -> Vec<u8> {
     let mut buf = Vec::new();
     // 1. sender (length-prefixed hex string)
     serialize_string(&to_hex(&tx.sender.0), &mut buf);
@@ -622,6 +686,16 @@ pub fn serialize_transaction_canonical(tx: &Transaction) -> Vec<u8> {
     // 4. nonce (u64 big-endian)
     serialize_u64(tx.nonce, &mut buf);
     // Note: Signature is EXCLUDED from canonical serialization for hashing
+    buf
+}
+
+pub fn serialize_transaction_canonical_v2(tx: &Transaction) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.push(tx.tx_type as u8);
+    serialize_string(&to_hex(&tx.sender.0), &mut buf);
+    serialize_string(&to_hex(&tx.recipient.0), &mut buf);
+    serialize_u64(tx.amount, &mut buf);
+    serialize_u64(tx.nonce, &mut buf);
     buf
 }
 
@@ -750,6 +824,8 @@ mod tests {
             parent_hash: BlockHash([0u8; 32]),
             height: 1,
             epoch: 2,
+            protocol_version: PROTOCOL_VERSION_V1,
+            round: 0,
             proposer_id: ValidatorId([0xaa; 32]),
             transactions: vec![],
             signatures: vec![],
@@ -775,6 +851,8 @@ mod tests {
             parent_hash: BlockHash([0x01; 32]),
             height: 100,
             epoch: 5,
+            protocol_version: PROTOCOL_VERSION_V1,
+            round: 0,
             proposer_id: ValidatorId([0x02; 32]),
             transactions: vec![],
             signatures: vec![],
@@ -956,6 +1034,8 @@ mod tests {
             parent_hash: BlockHash([0; 32]),
             height: 10,
             epoch: 0,
+            protocol_version: PROTOCOL_VERSION_V1,
+            round: 0,
             proposer_id: val_id,
             transactions: vec![],
             signatures: vec![],
@@ -1089,6 +1169,8 @@ mod tests {
             parent_hash: BlockHash([0u8; 32]),
             height: 1,
             epoch: 0,
+            protocol_version: PROTOCOL_VERSION_V1,
+            round: 0,
             proposer_id: ValidatorId([0xaa; 32]),
             transactions: vec![],
             signatures: vec![],

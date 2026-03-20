@@ -50,6 +50,8 @@ fn test_persistence_and_restart() {
         parent_hash: dummy_hash(0x99),
         height,
         epoch: 5,
+        protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+        round: 0,
         proposer_id: dummy_validator_id(1),
         transactions: vec![],
         signatures: vec![],

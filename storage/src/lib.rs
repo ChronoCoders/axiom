@@ -1,6 +1,6 @@
 use axiom_crypto::compute_block_hash;
 use axiom_primitives::{
-    AccountId, Block, BlockHash, ProtocolVersion, StakeAmount, StateHash, UnbondingEntry,
+    AccountId, Block, BlockHash, LockState, ProtocolVersion, StakeAmount, StateHash, UnbondingEntry,
     ValidatorId,
 };
 use axiom_state::{Account, StakingState, State, Validator};
@@ -144,6 +144,41 @@ impl Storage {
                 validator_id TEXT NOT NULL,
                 amount INTEGER NOT NULL,
                 release_height INTEGER NOT NULL
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS consensus_locks (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                height INTEGER NOT NULL,
+                round INTEGER NOT NULL,
+                block_hash TEXT
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS votes (
+                height INTEGER NOT NULL,
+                round INTEGER NOT NULL,
+                phase INTEGER NOT NULL,
+                validator_id TEXT NOT NULL,
+                block_hash TEXT,
+                signature TEXT NOT NULL,
+                PRIMARY KEY (height, round, phase, validator_id)
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                height INTEGER NOT NULL,
+                round INTEGER NOT NULL,
+                validator_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                payload BLOB NOT NULL
             )",
             [],
         )?;
@@ -410,6 +445,39 @@ impl Storage {
             ));
         }
         Ok(validators)
+    }
+
+    pub fn get_validator(&self, id: &ValidatorId) -> Result<Option<Validator>> {
+        let conn = self.conn.lock().map_err(|_| StorageError::LockPoisoned)?;
+        let mut stmt = conn.prepare(
+            "SELECT voting_power, account_id, active FROM validators WHERE validator_id = ?1",
+        )?;
+        let mut rows = stmt.query(params![id.to_string()])?;
+
+        if let Some(row) = rows.next()? {
+            let aid_str: String = row.get(1)?;
+            let aid_bytes = hex::decode(&aid_str)
+                .map_err(|e| StorageError::Corruption(format!("Invalid account id: {e}")))?;
+            if aid_bytes.len() != 32 {
+                return Err(StorageError::Corruption(
+                    "Invalid account id length".to_string(),
+                ));
+            }
+            let mut aid_arr = [0u8; 32];
+            aid_arr.copy_from_slice(&aid_bytes);
+            let aid = AccountId(aid_arr);
+
+            let voting_power: u64 = row.get(0)?;
+            let active_int: i32 = row.get(2)?;
+
+            Ok(Some(Validator {
+                voting_power,
+                account_id: aid,
+                active: active_int != 0,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Get genesis hash
@@ -754,6 +822,61 @@ impl Storage {
                 unbonding_period: axiom_primitives::UNBONDING_PERIOD,
                 unbonding_queue,
             })
+        }
+    }
+
+    pub fn save_lock_state(&self, lock: &LockState) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| StorageError::LockPoisoned)?;
+        let block_hash_str = lock.block_hash.map(|h| h.to_string());
+        conn.execute(
+            "INSERT INTO consensus_locks (id, height, round, block_hash)
+             VALUES (1, ?1, ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET height = excluded.height, round = excluded.round, block_hash = excluded.block_hash",
+            params![lock.height, lock.round, block_hash_str],
+        )?;
+        Ok(())
+    }
+
+    pub fn load_lock_state(&self) -> Result<Option<LockState>> {
+        let conn = self.conn.lock().map_err(|_| StorageError::LockPoisoned)?;
+
+        let row = conn.query_row(
+            "SELECT height, round, block_hash FROM consensus_locks WHERE id = 1",
+            [],
+            |row| {
+                let height: u64 = row.get(0)?;
+                let round: u64 = row.get(1)?;
+                let block_hash_str: Option<String> = row.get(2)?;
+                Ok((height, round, block_hash_str))
+            },
+        );
+
+        match row {
+            Ok((height, round, block_hash_str)) => {
+                let block_hash = match block_hash_str {
+                    Some(s) => {
+                        let bytes = hex::decode(&s).map_err(|e| {
+                            StorageError::Corruption(format!("Invalid block hash in consensus_locks: {e}"))
+                        })?;
+                        if bytes.len() != 32 {
+                            return Err(StorageError::Corruption(
+                                "Invalid block hash length in consensus_locks".to_string(),
+                            ));
+                        }
+                        let mut arr = [0u8; 32];
+                        arr.copy_from_slice(&bytes);
+                        Some(BlockHash(arr))
+                    }
+                    None => None,
+                };
+                Ok(Some(LockState {
+                    height,
+                    round,
+                    block_hash,
+                }))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StorageError::Database(e)),
         }
     }
 }
