@@ -499,6 +499,7 @@ tbody tr.clickable:hover { background: var(--accent-dim); }
 
 .badge-success { color: var(--success); background: var(--success-dim); }
 .badge-danger { color: var(--danger); background: var(--danger-dim); }
+.badge-muted { color: var(--muted); background: rgba(255,255,255,0.04); }
 
 .block-nav {
   display: flex;

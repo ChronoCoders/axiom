@@ -300,7 +300,7 @@ function renderValidatorRows(tbody, validators) {
   var list = validators || [];
   if (list.length === 0) {
     var tr = document.createElement("tr");
-    tr.innerHTML = '<td colspan="4" class="empty">No validators</td>';
+    tr.innerHTML = '<td colspan="6" class="empty">No validators</td>';
     tbody.appendChild(tr);
     return;
   }
@@ -308,10 +308,15 @@ function renderValidatorRows(tbody, validators) {
     var tr = document.createElement("tr");
     var idText = v.validator_id || "";
     var accountText = v.account_id || "";
+    var stakeText = v.stake_amount != null ? formatNumber(v.stake_amount) : "-";
+    var jailedText = v.jailed === true ? '<span class="badge badge-danger">jailed</span>' : '<span class="badge badge-muted">no</span>';
+    if (v.jailed == null) jailedText = "-";
     tr.innerHTML =
       '<td data-tip="' + idText + '">' + truncateHash(idText) + "</td>" +
       "<td>" + (v.voting_power || "") + "</td>" +
+      "<td>" + stakeText + "</td>" +
       '<td data-tip="' + accountText + '">' + truncateHash(accountText) + "</td>" +
+      "<td>" + jailedText + "</td>" +
       "<td>" + statusBadge(v.active) + "</td>";
     tbody.appendChild(tr);
   });
@@ -349,6 +354,7 @@ function initOverview() {
       set("height", formatNumber(s.height));
       set("validatorCount", String(s.validator_count));
       set("syncing", s.syncing ? "Yes" : "No");
+      set("protocolVersion", String(s.protocol_version != null ? s.protocol_version : "-"));
 
       set("latestHash", s.latest_block_hash || "-");
       var hashEl = document.getElementById("latestHash");
@@ -398,6 +404,19 @@ function initOverview() {
     }).catch(function () {
       setPulse(false);
     });
+
+    fetchJSON("/consensus").then(function (c) {
+      var txt = "h" + (c.next_height != null ? c.next_height : "-");
+      if (c.lock && c.lock.height != null) {
+        txt += " r" + c.lock.round;
+        if (c.lock.block_hash) {
+          txt += " lock " + truncateHash(c.lock.block_hash);
+        } else {
+          txt += " lock -";
+        }
+      }
+      set("consensusInfo", txt);
+    }).catch(function () {});
   }
   refresh();
   setInterval(refresh, 3000);
@@ -648,7 +667,10 @@ function initValidators() {
   fetchJSON("/validators").then(function (validators) {
     var list = validators || [];
     var active = list.filter(function (v) { return v.active; });
-    var totalPower = list.reduce(function (sum, v) { return sum + (v.voting_power || 0); }, 0);
+    var hasStake = list.some(function (v) { return v.stake_amount != null; });
+    var totalPower = list.reduce(function (sum, v) {
+      return sum + (hasStake ? (v.stake_amount || 0) : (v.voting_power || 0));
+    }, 0);
     var quorumThreshold = Math.floor(totalPower * 2 / 3);
     var quorumMin = quorumThreshold + 1;
 

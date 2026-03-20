@@ -147,3 +147,32 @@ async fn test_request_timeout() {
 
     assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
 }
+
+#[tokio::test]
+async fn test_v2_api_endpoints_exist() {
+    let (app, _dir, _, _) = setup_app().await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/staking")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/consensus")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}

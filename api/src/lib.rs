@@ -3,7 +3,8 @@ use axiom_mempool::Mempool;
 use axiom_network::PeerMap;
 use axiom_primitives::{
     serialize_transaction_canonical_v1, serialize_transaction_canonical_v2, AccountId, BlockHash,
-    ProtocolVersion, Transaction, TransactionType, ValidatorId, ValidatorSignature, PROTOCOL_VERSION,
+    LockState, ProtocolVersion, Transaction, TransactionType, ValidatorId, ValidatorSignature,
+    PROTOCOL_VERSION, V2_ACTIVATION_HEIGHT, V2_MIGRATION_STAKE_PER_VALIDATOR,
 };
 use axiom_storage::Storage;
 use axum::{
@@ -16,6 +17,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -443,6 +445,10 @@ struct ValidatorResponse {
     voting_power: u64,
     account_id: String,
     active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stake_amount: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jailed: Option<bool>,
 }
 
 async fn list_validators(
@@ -455,6 +461,28 @@ async fn list_validators(
         )
     })?;
 
+    let latest_height = state.storage.get_latest_height().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new(e.to_string(), "storage_error")),
+        )
+    })?;
+    let staking = state.storage.load_staking_state().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new(e.to_string(), "storage_error")),
+        )
+    })?;
+
+    let mut stake_map: BTreeMap<ValidatorId, u64> = BTreeMap::new();
+    for (vid, amt) in &staking.stakes {
+        stake_map.insert(*vid, amt.0);
+    }
+    let mut jailed: BTreeSet<ValidatorId> = BTreeSet::new();
+    for vid in &staking.jailed_validators {
+        jailed.insert(*vid);
+    }
+
     let response = validators
         .into_iter()
         .map(|(id, v)| ValidatorResponse {
@@ -462,10 +490,133 @@ async fn list_validators(
             voting_power: v.voting_power,
             account_id: v.account_id.to_string(),
             active: v.active,
+            stake_amount: if latest_height >= V2_ACTIVATION_HEIGHT {
+                if latest_height == V2_ACTIVATION_HEIGHT && staking.is_empty() {
+                    Some(V2_MIGRATION_STAKE_PER_VALIDATOR)
+                } else {
+                    Some(*stake_map.get(&id).unwrap_or(&0))
+                }
+            } else {
+                None
+            },
+            jailed: if latest_height >= V2_ACTIVATION_HEIGHT {
+                Some(jailed.contains(&id))
+            } else {
+                None
+            },
         })
         .collect();
 
     Ok(Json(response))
+}
+
+#[derive(Serialize)]
+struct StakingEntryResponse {
+    validator_id: String,
+    amount: u64,
+}
+
+#[derive(Serialize)]
+struct UnbondingEntryResponse {
+    validator_id: String,
+    amount: u64,
+    release_height: u64,
+}
+
+#[derive(Serialize)]
+struct StakingResponse {
+    enabled: bool,
+    epoch: u64,
+    minimum_stake: u64,
+    unbonding_period: u64,
+    stakes: Vec<StakingEntryResponse>,
+    unbonding_queue: Vec<UnbondingEntryResponse>,
+    jailed_validators: Vec<String>,
+    processed_evidence_count: usize,
+}
+
+async fn get_staking(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<StakingResponse>, (StatusCode, Json<ApiError>)> {
+    let latest_height = state.storage.get_latest_height().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new(e.to_string(), "storage_error")),
+        )
+    })?;
+
+    let staking = state.storage.load_staking_state().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new(e.to_string(), "storage_error")),
+        )
+    })?;
+
+    let enabled = latest_height >= V2_ACTIVATION_HEIGHT;
+    let stakes = staking
+        .stakes
+        .iter()
+        .map(|(vid, amt)| StakingEntryResponse {
+            validator_id: vid.to_string(),
+            amount: amt.0,
+        })
+        .collect();
+    let unbonding_queue = staking
+        .unbonding_queue
+        .iter()
+        .map(|e| UnbondingEntryResponse {
+            validator_id: e.validator_id.to_string(),
+            amount: e.amount.0,
+            release_height: e.release_height,
+        })
+        .collect();
+    let jailed_validators = staking
+        .jailed_validators
+        .iter()
+        .map(|vid| vid.to_string())
+        .collect();
+
+    Ok(Json(StakingResponse {
+        enabled,
+        epoch: staking.epoch,
+        minimum_stake: staking.minimum_stake,
+        unbonding_period: staking.unbonding_period,
+        stakes,
+        unbonding_queue,
+        jailed_validators,
+        processed_evidence_count: staking.processed_evidence.len(),
+    }))
+}
+
+#[derive(Serialize)]
+struct ConsensusResponse {
+    next_height: u64,
+    protocol_version: u64,
+    lock: Option<LockState>,
+}
+
+async fn get_consensus(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ConsensusResponse>, (StatusCode, Json<ApiError>)> {
+    let height = state.storage.get_latest_height().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new(e.to_string(), "storage_error")),
+        )
+    })?;
+    let next_height = height.saturating_add(1);
+    let protocol_version = ProtocolVersion::for_height(next_height).as_u64();
+    let lock = state.storage.load_lock_state().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new(e.to_string(), "storage_error")),
+        )
+    })?;
+    Ok(Json(ConsensusResponse {
+        next_height,
+        protocol_version,
+        lock,
+    }))
 }
 
 /// Response for a connected peer.
@@ -773,6 +924,8 @@ pub fn app_router(state: Arc<AppState>, web_dir: PathBuf) -> Router {
         .route("/blocks/by-hash/:hash", get(get_block_by_hash))
         .route("/accounts/:id", get(get_account))
         .route("/validators", get(list_validators))
+        .route("/staking", get(get_staking))
+        .route("/consensus", get(get_consensus))
         .route("/network/peers", get(list_peers))
         .route("/transactions", post(submit_transaction));
 
