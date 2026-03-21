@@ -1,5 +1,11 @@
 $ErrorActionPreference = "Stop"
 
+[CmdletBinding()]
+param(
+    [switch]$FastForward,
+    [UInt64]$FastForwardHeight = 9999
+)
+
 # Resolve workspace root (parent of 'scripts' directory)
 $ScriptDir = $PSScriptRoot
 $Root = (Resolve-Path "$ScriptDir/..").Path
@@ -10,6 +16,12 @@ $TestnetDir = "$Root/testnet_data"
 Write-Host "Building Node..."
 cargo build -p axiom-node
 if ($LASTEXITCODE -ne 0) { exit 1 }
+
+if ($FastForward) {
+    Write-Host "Building fast-forward..."
+    cargo build -p fast-forward
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+}
 
 # Kill any existing testnet nodes
 $PidFile = "$TestnetDir/pids.txt"
@@ -56,6 +68,13 @@ foreach ($i in $Nodes) {
     Copy-Item "$TestnetDir/genesis.json" "$NodeDir/genesis.json"
     Copy-Item -Recurse "$Root/web" "$NodeDir/web"
     Copy-Item "$TestnetDir/validator_$i.secret" "$NodeDir/validator_key"
+
+    if ($FastForward) {
+        $DbPath = "$NodeDir/axiom.db"
+        if (Test-Path $DbPath) { Remove-Item -Force $DbPath }
+        & "$Root/target/debug/fast-forward.exe" $DbPath $FastForwardHeight "$NodeDir/genesis.json"
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+    }
     
     # Generate Peers List and API Map (exclude self)
     $Peers = @()

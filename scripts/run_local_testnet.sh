@@ -5,9 +5,23 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN_DIR="$ROOT/target/debug"
 TESTNET="$ROOT/testnet_data"
 
+FAST_FORWARD=0
+FAST_FORWARD_HEIGHT=9999
+for arg in "$@"; do
+  case "$arg" in
+    --fast-forward) FAST_FORWARD=1 ;;
+    --fast-forward-height=*) FAST_FORWARD_HEIGHT="${arg#*=}" ;;
+  esac
+done
+
 # 1. Build Node
 echo "Building Node..."
 cargo build -p axiom-node
+
+if [ "$FAST_FORWARD" -eq 1 ]; then
+  echo "Building fast-forward..."
+  cargo build -p fast-forward
+fi
 
 # 2. Kill existing nodes
 pkill -f axiom-node 2>/dev/null || true
@@ -38,6 +52,11 @@ for i in 1 2 3 4; do
   cp "$TESTNET/genesis.json" "$NODE_DIR/genesis.json"
   cp -r "$ROOT/web" "$NODE_DIR/web"
   cp "$TESTNET/validator_$i.secret" "$NODE_DIR/validator_key"
+
+  if [ "$FAST_FORWARD" -eq 1 ]; then
+    rm -f "$NODE_DIR/axiom.db"
+    "$BIN_DIR/fast-forward" "$NODE_DIR/axiom.db" "$FAST_FORWARD_HEIGHT" "$NODE_DIR/genesis.json"
+  fi
 
   PEERS=""
   PEER_API_MAP=""
