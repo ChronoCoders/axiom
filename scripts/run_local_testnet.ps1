@@ -1,10 +1,10 @@
-$ErrorActionPreference = "Stop"
-
 [CmdletBinding()]
 param(
     [switch]$FastForward,
     [UInt64]$FastForwardHeight = 9999
 )
+
+$ErrorActionPreference = "Stop"
 
 # Resolve workspace root (parent of 'scripts' directory)
 $ScriptDir = $PSScriptRoot
