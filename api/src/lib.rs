@@ -11,7 +11,7 @@ use axum::{
     error_handling::HandleErrorLayer,
     extract::{Path, Query, State},
     http::StatusCode,
-    response::Json,
+    response::{IntoResponse, Json},
     routing::{get, post},
     BoxError, Router,
 };
@@ -173,11 +173,15 @@ async fn auth_logout(
 #[derive(Serialize)]
 struct StatusResponse {
     protocol_version: u64,
+    next_protocol_version: u64,
     node_version: String,
+    build_commit: Option<String>,
     height: u64,
     latest_block_hash: String,
     genesis_hash: String,
     validator_count: usize,
+    peer_count: usize,
+    mempool_size: usize,
     syncing: bool,
 }
 
@@ -218,15 +222,92 @@ async fn status(
         )
     })?;
 
+    let peer_count = state
+        .peers
+        .lock()
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    let mempool_size = state
+        .mempool
+        .lock()
+        .map(|m| m.size())
+        .unwrap_or(0);
+
+    let next_height = height.saturating_add(1);
+    let next_protocol_version = ProtocolVersion::for_height(next_height).as_u64();
+
     Ok(Json(StatusResponse {
         protocol_version: PROTOCOL_VERSION,
+        next_protocol_version,
         node_version: env!("CARGO_PKG_VERSION").to_string(),
+        build_commit: option_env!("GIT_SHA").map(|s| s.to_string()),
         height,
         latest_block_hash,
         genesis_hash: genesis_hash.to_string(),
         validator_count: validators.len(),
+        peer_count,
+        mempool_size,
         syncing: false, // Always false for now
     }))
+}
+
+async fn metrics(
+    State(state): State<Arc<AppState>>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let height = state.storage.get_latest_height().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new(e.to_string(), "storage_error")),
+        )
+    })?;
+    let genesis_hash = state.storage.get_genesis_hash().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new(e.to_string(), "storage_error")),
+        )
+    })?;
+    let validators = state.storage.get_validators().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new(e.to_string(), "storage_error")),
+        )
+    })?;
+
+    let peer_count = state
+        .peers
+        .lock()
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let mempool_size = state
+        .mempool
+        .lock()
+        .map(|m| m.size())
+        .unwrap_or(0);
+
+    let next_height = height.saturating_add(1);
+    let next_protocol_version = ProtocolVersion::for_height(next_height).as_u64();
+
+    let version = env!("CARGO_PKG_VERSION");
+    let commit = option_env!("GIT_SHA").unwrap_or("");
+
+    let body = format!(
+        "axiom_build_info{{version=\"{}\",commit=\"{}\"}} 1\naxiom_height {}\naxiom_next_protocol_version {}\naxiom_validators_total {}\naxiom_peers_connected {}\naxiom_mempool_size {}\naxiom_genesis_hash{{hash=\"{}\"}} 1\n",
+        version,
+        commit,
+        height,
+        next_protocol_version,
+        validators.len(),
+        peer_count,
+        mempool_size,
+        genesis_hash
+    );
+
+    Ok((
+        StatusCode::OK,
+        [("content-type", "text/plain; version=0.0.4; charset=utf-8")],
+        body,
+    ))
 }
 
 // Blocks
@@ -919,6 +1000,7 @@ pub fn app_router(state: Arc<AppState>, web_dir: PathBuf) -> Router {
     // API Routes (Hardening: Rate Limits, Timeouts, Tracing)
     let api_routes = Router::new()
         .route("/status", get(status))
+        .route("/metrics", get(metrics))
         .route("/blocks", get(list_blocks))
         .route("/blocks/:height", get(get_block_by_height))
         .route("/blocks/by-hash/:hash", get(get_block_by_hash))
