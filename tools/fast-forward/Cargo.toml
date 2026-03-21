@@ -1,0 +1,11 @@
+[package]
+name = "fast-forward"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axiom-primitives = { path = "../../primitives" }
+axiom-state = { path = "../../state" }
+axiom-execution = { path = "../../execution" }
+axiom-storage = { path = "../../storage" }
+axiom-crypto = { path = "../../crypto" }

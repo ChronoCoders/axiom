@@ -771,6 +771,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
+name = "fast-forward"
+version = "0.1.0"
+dependencies = [
+ "axiom-crypto",
+ "axiom-execution",
+ "axiom-primitives",
+ "axiom-state",
+ "axiom-storage",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

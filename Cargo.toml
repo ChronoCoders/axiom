@@ -12,6 +12,7 @@ members = [
     "api",
     "node",
     "tools/genesis-tool",
+    "tools/fast-forward",
     "tools/test-vector-gen",
 ]
 
