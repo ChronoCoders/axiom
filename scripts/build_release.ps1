@@ -9,6 +9,7 @@ if (Test-Path $OutDir) {
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 Push-Location $Root
+$env:GIT_SHA = (git rev-parse HEAD)
 cargo build --release -p axiom-node
 if ($LASTEXITCODE -ne 0) { exit 1 }
 cargo build --release -p fast-forward

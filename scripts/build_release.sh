@@ -7,6 +7,8 @@ OUT="$ROOT/dist"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
+export GIT_SHA="$(git rev-parse HEAD)"
+
 cargo build --release -p axiom-node
 cargo build --release -p fast-forward
 cargo build --release -p genesis-tool
