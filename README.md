@@ -76,8 +76,6 @@ Health:
 - `GET /health/live`
 - `GET /health/ready`
 
-See [API.md](file:///c:/axiom/docs/API.md).
-
 ## Configuration
 
 Nodes are configured via `axiom.toml`, environment overrides, and CLI flags.
@@ -86,13 +84,9 @@ Key sections:
 
 - `[node]`, `[network]`, `[api]`, `[storage]`, `[genesis]`, `[mempool]`, `[logging]`, `[console]`
 
-See [CONFIG.md](file:///c:/axiom/docs/CONFIG.md).
-
 ## Protocol & Compliance
 
-- v1 protocol spec: [PROTOCOL_v1.md](file:///c:/axiom/docs/PROTOCOL_v1.md)
-- Locked test vectors (normative): [TEST_VECTORS.md](file:///c:/axiom/docs/TEST_VECTORS.md)
-- Locked reference genesis: [reference_genesis.json](file:///c:/axiom/docs/reference_genesis.json)
+- Locked reference genesis: [reference_genesis.json](file:///c:/axiom/fixtures/reference_genesis.json)
 
 The node binary enforces a locked genesis hash at startup. If the configured `genesis_file` does not match the locked hash, the node exits.
 

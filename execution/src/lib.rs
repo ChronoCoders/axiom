@@ -2351,7 +2351,7 @@ mod tests {
                 .expect("Expected 32 bytes")
         }
 
-        let genesis_json = include_str!("../../docs/reference_genesis.json");
+        let genesis_json = include_str!("../../fixtures/reference_genesis.json");
         let genesis =
             axiom_primitives::deserialize_genesis_json(genesis_json).expect("Invalid genesis JSON");
 

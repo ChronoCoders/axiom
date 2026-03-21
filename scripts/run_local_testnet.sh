@@ -21,7 +21,7 @@ fi
 mkdir -p "$TESTNET"
 
 # 4. Use Locked Reference Genesis + Locked Test Validator Keys
-cp "$ROOT/docs/reference_genesis.json" "$TESTNET/genesis.json"
+cp "$ROOT/fixtures/reference_genesis.json" "$TESTNET/genesis.json"
 printf "%s" "eed1444f431a29ddaba560d09559f7b3453cc1def5861ab51bcd3344dae18834" > "$TESTNET/validator_1.secret"
 printf "%s" "9bd3bf36c5da99993f250e5b2e558e6768583ed5bbbd24a39560fca381b3c369" > "$TESTNET/validator_2.secret"
 printf "%s" "2a8e0ea62396cbe5821e10a3700ee4da1a96eea2bed02c6f28d16591e682e3cb" > "$TESTNET/validator_3.secret"

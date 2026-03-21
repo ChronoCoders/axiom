@@ -29,7 +29,7 @@ fn main() {
     let genesis_path = if !args.is_empty() {
         PathBuf::from(args.remove(0))
     } else {
-        PathBuf::from("docs/reference_genesis.json")
+        PathBuf::from("fixtures/reference_genesis.json")
     };
 
     let genesis_json = std::fs::read_to_string(&genesis_path)

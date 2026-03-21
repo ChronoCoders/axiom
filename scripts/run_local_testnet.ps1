@@ -31,7 +31,7 @@ if (Test-Path $TestnetDir) {
 New-Item -ItemType Directory -Force -Path $TestnetDir | Out-Null
 
 # 3. Use Locked Reference Genesis + Locked Test Validator Keys
-Copy-Item "$Root/docs/reference_genesis.json" "$TestnetDir/genesis.json"
+Copy-Item "$Root/fixtures/reference_genesis.json" "$TestnetDir/genesis.json"
 
 $ValidatorSecrets = @(
     "eed1444f431a29ddaba560d09559f7b3453cc1def5861ab51bcd3344dae18834",

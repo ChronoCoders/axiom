@@ -7,7 +7,7 @@ use axiom_primitives::{
 use axiom_state::{StakingState, State};
 
 fn load_reference_genesis_state() -> State {
-    let genesis = axiom_primitives::deserialize_genesis_json(include_str!("../../docs/reference_genesis.json")).unwrap();
+    let genesis = axiom_primitives::deserialize_genesis_json(include_str!("../../fixtures/reference_genesis.json")).unwrap();
     State::from_genesis(&genesis).unwrap()
 }
 
