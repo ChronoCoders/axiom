@@ -176,3 +176,19 @@ async fn test_v2_api_endpoints_exist() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn test_body_limit_rejects_large_payload() {
+    let (app, _dir, _, _) = setup_app().await;
+
+    let big = vec![b'a'; 400_000];
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/transactions")
+        .header("content-type", "application/json")
+        .body(Body::from(big))
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}

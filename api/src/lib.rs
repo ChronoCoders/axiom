@@ -9,7 +9,7 @@ use axiom_primitives::{
 use axiom_storage::Storage;
 use axum::{
     error_handling::HandleErrorLayer,
-    extract::{Path, Query, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Json},
     routing::{get, post},
@@ -997,6 +997,12 @@ async fn submit_transaction(
 }
 
 pub fn app_router(state: Arc<AppState>, web_dir: PathBuf) -> Router {
+    let max_body_bytes = state
+        .max_tx_bytes
+        .saturating_mul(4)
+        .saturating_add(4096)
+        .min(1_048_576);
+
     // API Routes (Hardening: Rate Limits, Timeouts, Tracing)
     let api_routes = Router::new()
         .route("/status", get(status))
@@ -1022,6 +1028,7 @@ pub fn app_router(state: Arc<AppState>, web_dir: PathBuf) -> Router {
         .layer(
             ServiceBuilder::new()
                 .layer(HandleErrorLayer::new(handle_error))
+                .layer(DefaultBodyLimit::max(max_body_bytes))
                 .layer(BufferLayer::new(1024))
                 .layer(TraceLayer::new_for_http())
                 .layer(LoadShedLayer::new())
