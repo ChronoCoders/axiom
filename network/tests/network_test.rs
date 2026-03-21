@@ -4,6 +4,7 @@ use axiom_primitives::{
     TransactionType, ValidatorId, ValidatorSignature, Vote, VotePhase,
 };
 use std::net::SocketAddr;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{sleep, timeout, Duration};
 
 // Helper to create dummy data
@@ -121,6 +122,7 @@ async fn test_serialization_variants() {
 }
 
 use tokio::sync::broadcast;
+use tokio::net::TcpStream;
 
 #[tokio::test]
 async fn test_peer_unavailable() {
@@ -139,6 +141,13 @@ async fn test_peer_unavailable() {
         local_height: 0,
         local_genesis_hash: StateHash([9; 32]),
         local_protocol_version: 1,
+        max_message_bytes: 2 * 1024 * 1024,
+        max_tx_bytes: 65_536,
+        max_block_bytes: 2 * 1_048_576,
+        max_evidence_bytes: 131_072,
+        max_messages_per_sec: 200,
+        handshake_timeout: Duration::from_secs(5),
+        max_handshake_messages: 32,
     };
 
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
@@ -167,6 +176,13 @@ async fn test_peer_reconnection() {
         local_height: 0,
         local_genesis_hash: genesis_hash,
         local_protocol_version: 1,
+        max_message_bytes: 2 * 1024 * 1024,
+        max_tx_bytes: 65_536,
+        max_block_bytes: 2 * 1_048_576,
+        max_evidence_bytes: 131_072,
+        max_messages_per_sec: 200,
+        handshake_timeout: Duration::from_secs(5),
+        max_handshake_messages: 32,
     };
 
     // Config for Node B: listens
@@ -178,6 +194,13 @@ async fn test_peer_reconnection() {
         local_height: 0,
         local_genesis_hash: genesis_hash,
         local_protocol_version: 1,
+        max_message_bytes: 2 * 1024 * 1024,
+        max_tx_bytes: 65_536,
+        max_block_bytes: 2 * 1_048_576,
+        max_evidence_bytes: 131_072,
+        max_messages_per_sec: 200,
+        handshake_timeout: Duration::from_secs(5),
+        max_handshake_messages: 32,
     };
 
     // Start Node A
@@ -228,6 +251,13 @@ async fn test_3_node_communication() {
         local_height: 0,
         local_genesis_hash: genesis_hash,
         local_protocol_version: 1,
+        max_message_bytes: 2 * 1024 * 1024,
+        max_tx_bytes: 65_536,
+        max_block_bytes: 2 * 1_048_576,
+        max_evidence_bytes: 131_072,
+        max_messages_per_sec: 200,
+        handshake_timeout: Duration::from_secs(5),
+        max_handshake_messages: 32,
     };
     let config_b = NetworkConfig {
         bind_addr: addr_b,
@@ -237,6 +267,13 @@ async fn test_3_node_communication() {
         local_height: 0,
         local_genesis_hash: genesis_hash,
         local_protocol_version: 1,
+        max_message_bytes: 2 * 1024 * 1024,
+        max_tx_bytes: 65_536,
+        max_block_bytes: 2 * 1_048_576,
+        max_evidence_bytes: 131_072,
+        max_messages_per_sec: 200,
+        handshake_timeout: Duration::from_secs(5),
+        max_handshake_messages: 32,
     };
     let config_c = NetworkConfig {
         bind_addr: addr_c,
@@ -246,6 +283,13 @@ async fn test_3_node_communication() {
         local_height: 0,
         local_genesis_hash: genesis_hash,
         local_protocol_version: 1,
+        max_message_bytes: 2 * 1024 * 1024,
+        max_tx_bytes: 65_536,
+        max_block_bytes: 2 * 1_048_576,
+        max_evidence_bytes: 131_072,
+        max_messages_per_sec: 200,
+        handshake_timeout: Duration::from_secs(5),
+        max_handshake_messages: 32,
     };
 
     let (shutdown_tx_a, shutdown_rx_a) = broadcast::channel(1);
@@ -298,4 +342,86 @@ async fn test_3_node_communication() {
     let _ = shutdown_tx_a.send(());
     let _ = shutdown_tx_b.send(());
     let _ = shutdown_tx_c.send(());
+}
+
+#[tokio::test]
+async fn test_rejects_oversized_transaction_gossip() {
+    let addr_a = get_free_port().await;
+    let addr_b = get_free_port().await;
+    let genesis_hash = StateHash([9; 32]);
+
+    let config_a = NetworkConfig {
+        bind_addr: addr_a,
+        peers: vec![addr_b],
+        retry_interval: Some(Duration::from_millis(100)),
+        peer_api_map: std::collections::HashMap::new(),
+        local_height: 0,
+        local_genesis_hash: genesis_hash,
+        local_protocol_version: 1,
+        max_message_bytes: 2 * 1024 * 1024,
+        max_tx_bytes: 32,
+        max_block_bytes: 2 * 1_048_576,
+        max_evidence_bytes: 131_072,
+        max_messages_per_sec: 200,
+        handshake_timeout: Duration::from_secs(5),
+        max_handshake_messages: 32,
+    };
+    let config_b = NetworkConfig {
+        bind_addr: addr_b,
+        peers: vec![],
+        retry_interval: None,
+        peer_api_map: std::collections::HashMap::new(),
+        local_height: 0,
+        local_genesis_hash: genesis_hash,
+        local_protocol_version: 1,
+        max_message_bytes: 2 * 1024 * 1024,
+        max_tx_bytes: 32,
+        max_block_bytes: 2 * 1_048_576,
+        max_evidence_bytes: 131_072,
+        max_messages_per_sec: 200,
+        handshake_timeout: Duration::from_secs(5),
+        max_handshake_messages: 32,
+    };
+
+    let (shutdown_tx_a, shutdown_rx_a) = broadcast::channel(1);
+    let (shutdown_tx_b, shutdown_rx_b) = broadcast::channel(1);
+    let (_tx_a, mut rx_a, _peers_a) = Network::start(config_a, shutdown_rx_a).await;
+    let (_tx_b, _rx_b, _peers_b) = Network::start(config_b, shutdown_rx_b).await;
+
+    sleep(Duration::from_millis(200)).await;
+
+    let mut stream = TcpStream::connect(addr_a).await.unwrap();
+
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf).await.unwrap();
+    let len = u32::from_be_bytes(len_buf) as usize;
+    let mut buf = vec![0u8; len];
+    stream.read_exact(&mut buf).await.unwrap();
+    let inbound: NetworkMessage = bincode::deserialize(&buf).unwrap();
+    assert!(matches!(inbound, NetworkMessage::StatusRequest));
+
+    let resp = NetworkMessage::StatusResponse {
+        protocol_version: 1,
+        height: 0,
+        genesis_hash,
+    };
+    let resp_bytes = bincode::serialize(&resp).unwrap();
+    let resp_len = resp_bytes.len() as u32;
+    stream.write_all(&resp_len.to_be_bytes()).await.unwrap();
+    stream.write_all(&resp_bytes).await.unwrap();
+
+    let msg = NetworkMessage::TransactionGossip(dummy_tx());
+    let bytes = bincode::serialize(&msg).unwrap();
+    let len = bytes.len() as u32;
+    stream.write_all(&len.to_be_bytes()).await.unwrap();
+    stream.write_all(&bytes).await.unwrap();
+
+    if let Ok(Some(NetworkMessage::TransactionGossip(_))) =
+        timeout(Duration::from_millis(500), rx_a.recv()).await
+    {
+        panic!("Expected oversized tx to be rejected");
+    }
+
+    let _ = shutdown_tx_a.send(());
+    let _ = shutdown_tx_b.send(());
 }

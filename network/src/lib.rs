@@ -16,6 +16,67 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 
+const DEFAULT_MAX_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
+const DEFAULT_MAX_TX_BYTES: usize = 65_536;
+const DEFAULT_MAX_BLOCK_BYTES: usize = 2 * 1_048_576;
+const DEFAULT_MAX_EVIDENCE_BYTES: usize = 131_072;
+const DEFAULT_MAX_MESSAGES_PER_SEC: u32 = 200;
+const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+const DEFAULT_MAX_HANDSHAKE_MESSAGES: u32 = 32;
+
+#[derive(Clone, Copy)]
+struct ConnectionLimits {
+    max_message_bytes: usize,
+    max_tx_bytes: usize,
+    max_block_bytes: usize,
+    max_evidence_bytes: usize,
+    max_messages_per_sec: u32,
+    handshake_timeout: Duration,
+    max_handshake_messages: u32,
+}
+
+impl ConnectionLimits {
+    fn normalized(self) -> Self {
+        Self {
+            max_message_bytes: if self.max_message_bytes == 0 {
+                DEFAULT_MAX_MESSAGE_BYTES
+            } else {
+                self.max_message_bytes
+            },
+            max_tx_bytes: if self.max_tx_bytes == 0 {
+                DEFAULT_MAX_TX_BYTES
+            } else {
+                self.max_tx_bytes
+            },
+            max_block_bytes: if self.max_block_bytes == 0 {
+                DEFAULT_MAX_BLOCK_BYTES
+            } else {
+                self.max_block_bytes
+            },
+            max_evidence_bytes: if self.max_evidence_bytes == 0 {
+                DEFAULT_MAX_EVIDENCE_BYTES
+            } else {
+                self.max_evidence_bytes
+            },
+            max_messages_per_sec: if self.max_messages_per_sec == 0 {
+                DEFAULT_MAX_MESSAGES_PER_SEC
+            } else {
+                self.max_messages_per_sec
+            },
+            handshake_timeout: if self.handshake_timeout == Duration::from_secs(0) {
+                DEFAULT_HANDSHAKE_TIMEOUT
+            } else {
+                self.handshake_timeout
+            },
+            max_handshake_messages: if self.max_handshake_messages == 0 {
+                DEFAULT_MAX_HANDSHAKE_MESSAGES
+            } else {
+                self.max_handshake_messages
+            },
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum NetworkMessage {
     BlockProposal(Block),
@@ -48,6 +109,20 @@ pub struct NetworkConfig {
     pub local_genesis_hash: StateHash,
     /// Local node's protocol version (network identity).
     pub local_protocol_version: u64,
+    /// Maximum size of any single framed network message in bytes (length prefix excludes).
+    pub max_message_bytes: usize,
+    /// Maximum size of a gossiped transaction payload.
+    pub max_tx_bytes: usize,
+    /// Maximum size of a gossiped block/proposal payload.
+    pub max_block_bytes: usize,
+    /// Maximum size of a gossiped evidence payload.
+    pub max_evidence_bytes: usize,
+    /// Maximum number of messages allowed per second per connection.
+    pub max_messages_per_sec: u32,
+    /// Maximum time allowed for a peer to complete the status handshake.
+    pub handshake_timeout: Duration,
+    /// Maximum number of non-handshake messages tolerated before handshake completes.
+    pub max_handshake_messages: u32,
 }
 
 /// Information about a connected peer.
@@ -113,6 +188,17 @@ impl Network {
 
         // 2. Peer Connection Tasks (Persistent Outgoing)
         // For each peer in the config, we start a dedicated task that maintains a connection
+        let limits = ConnectionLimits {
+            max_message_bytes: config.max_message_bytes,
+            max_tx_bytes: config.max_tx_bytes,
+            max_block_bytes: config.max_block_bytes,
+            max_evidence_bytes: config.max_evidence_bytes,
+            max_messages_per_sec: config.max_messages_per_sec,
+            handshake_timeout: config.handshake_timeout,
+            max_handshake_messages: config.max_handshake_messages,
+        }
+        .normalized();
+
         for peer_addr in config.peers {
             let bcast_rx = bcast_tx.subscribe();
             let mut shutdown_rx_peer = shutdown_rx.resubscribe();
@@ -152,6 +238,7 @@ impl Network {
                             local_protocol_version,
                             local_height,
                             local_genesis_hash,
+                            limits,
                         )
                         .await
                     {
@@ -200,6 +287,16 @@ impl Network {
                                             }
                                          };
 
+                                         if bytes.len() > limits.max_message_bytes {
+                                             warn!(
+                                                 "Dropping outbound message to {} ({} bytes > max {})",
+                                                 peer_addr,
+                                                 bytes.len(),
+                                                 limits.max_message_bytes
+                                             );
+                                             continue;
+                                         }
+
                                          let len = bytes.len() as u32;
                                          if let Err(e) = stream.write_all(&len.to_be_bytes()).await {
                                              warn!("Failed to write length to {}: {}", peer_addr, e);
@@ -244,6 +341,16 @@ impl Network {
         let local_height = config.local_height;
         let local_genesis_hash = config.local_genesis_hash;
         let local_protocol_version = config.local_protocol_version;
+        let limits = ConnectionLimits {
+            max_message_bytes: config.max_message_bytes,
+            max_tx_bytes: config.max_tx_bytes,
+            max_block_bytes: config.max_block_bytes,
+            max_evidence_bytes: config.max_evidence_bytes,
+            max_messages_per_sec: config.max_messages_per_sec,
+            handshake_timeout: config.handshake_timeout,
+            max_handshake_messages: config.max_handshake_messages,
+        }
+        .normalized();
 
         tokio::spawn(async move {
             let listener = match TcpListener::bind(bind_addr).await {
@@ -276,6 +383,7 @@ impl Network {
                                         local_protocol_version,
                                         local_height,
                                         local_genesis_hash,
+                                        limits,
                                     )
                                     .await
                                     {
@@ -304,11 +412,40 @@ async fn handle_incoming_connection(
     local_protocol_version: u64,
     local_height: u64,
     local_genesis_hash: StateHash,
+    limits: ConnectionLimits,
 ) -> std::io::Result<()> {
-    send_network_message(&mut stream, &NetworkMessage::StatusRequest).await?;
+    send_network_message(
+        &mut stream,
+        &NetworkMessage::StatusRequest,
+        limits.max_message_bytes,
+    )
+    .await?;
     let mut verified = false;
+    let handshake_started_at = std::time::Instant::now();
+    let mut handshake_message_count: u32 = 0;
+    let mut window_started_at = std::time::Instant::now();
+    let mut window_count: u32 = 0;
 
     loop {
+        if window_started_at.elapsed() >= Duration::from_secs(1) {
+            window_started_at = std::time::Instant::now();
+            window_count = 0;
+        }
+        window_count = window_count.saturating_add(1);
+        if window_count > limits.max_messages_per_sec {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Peer message rate limit exceeded",
+            ));
+        }
+
+        if !verified && handshake_started_at.elapsed() > limits.handshake_timeout {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Handshake timeout",
+            ));
+        }
+
         // 1. Read Length (4 bytes)
         let mut len_buf = [0u8; 4];
         match stream.read_exact(&mut len_buf).await {
@@ -318,8 +455,7 @@ async fn handle_incoming_connection(
         }
         let len = u32::from_be_bytes(len_buf) as usize;
 
-        if len > 10 * 1024 * 1024 {
-            // 10MB Safety limit
+        if len > limits.max_message_bytes {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "Message too large",
@@ -340,7 +476,7 @@ async fn handle_incoming_connection(
                             height: local_height,
                             genesis_hash: local_genesis_hash,
                         };
-                        send_network_message(&mut stream, &resp).await?;
+                        send_network_message(&mut stream, &resp, limits.max_message_bytes).await?;
                     }
                     NetworkMessage::StatusResponse {
                         protocol_version,
@@ -363,9 +499,28 @@ async fn handle_incoming_connection(
                     }
                     other => {
                         if !verified {
+                            validate_message_payload_size(
+                                &other,
+                                limits.max_tx_bytes,
+                                limits.max_block_bytes,
+                                limits.max_evidence_bytes,
+                            )?;
+                            handshake_message_count = handshake_message_count.saturating_add(1);
+                            if handshake_message_count > limits.max_handshake_messages {
+                                return Err(std::io::Error::new(
+                                    std::io::ErrorKind::PermissionDenied,
+                                    "Too many messages before handshake completes",
+                                ));
+                            }
                             debug!("Dropping message before handshake completes: {:?}", other);
                             continue;
                         }
+                        validate_message_payload_size(
+                            &other,
+                            limits.max_tx_bytes,
+                            limits.max_block_bytes,
+                            limits.max_evidence_bytes,
+                        )?;
                         if let Err(e) = tx.send(other).await {
                             error!("Failed to forward message to node: {}", e);
                             return Ok(());
@@ -386,15 +541,25 @@ async fn perform_handshake(
     local_protocol_version: u64,
     local_height: u64,
     local_genesis_hash: StateHash,
+    limits: ConnectionLimits,
 ) -> std::io::Result<()> {
-    send_network_message(stream, &NetworkMessage::StatusRequest).await?;
+    send_network_message(
+        stream,
+        &NetworkMessage::StatusRequest,
+        limits.max_message_bytes,
+    )
+    .await?;
 
-    let mut remaining = Duration::from_secs(3);
+    let mut remaining = limits.handshake_timeout;
     let mut verified = false;
 
     while !verified {
         let start = std::time::Instant::now();
-        let msg = tokio::time::timeout(remaining, read_network_message(stream)).await??;
+        let msg = tokio::time::timeout(
+            remaining,
+            read_network_message(stream, limits.max_message_bytes),
+        )
+            .await??;
         let elapsed = start.elapsed();
         remaining = remaining.saturating_sub(elapsed);
 
@@ -405,7 +570,7 @@ async fn perform_handshake(
                     height: local_height,
                     genesis_hash: local_genesis_hash,
                 };
-                send_network_message(stream, &resp).await?;
+                send_network_message(stream, &resp, limits.max_message_bytes).await?;
             }
             NetworkMessage::StatusResponse {
                 protocol_version,
@@ -435,20 +600,33 @@ async fn perform_handshake(
     Ok(())
 }
 
-async fn send_network_message(stream: &mut TcpStream, msg: &NetworkMessage) -> std::io::Result<()> {
+async fn send_network_message(
+    stream: &mut TcpStream,
+    msg: &NetworkMessage,
+    max_message_bytes: usize,
+) -> std::io::Result<()> {
     let bytes = bincode::serialize(msg)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    if bytes.len() > max_message_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Outbound message too large",
+        ));
+    }
     let len = bytes.len() as u32;
     stream.write_all(&len.to_be_bytes()).await?;
     stream.write_all(&bytes).await?;
     Ok(())
 }
 
-async fn read_network_message(stream: &mut TcpStream) -> std::io::Result<NetworkMessage> {
+async fn read_network_message(
+    stream: &mut TcpStream,
+    max_message_bytes: usize,
+) -> std::io::Result<NetworkMessage> {
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await?;
     let len = u32::from_be_bytes(len_buf) as usize;
-    if len > 10 * 1024 * 1024 {
+    if len > max_message_bytes {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "Message too large",
@@ -458,4 +636,61 @@ async fn read_network_message(stream: &mut TcpStream) -> std::io::Result<Network
     stream.read_exact(&mut buf).await?;
     bincode::deserialize::<NetworkMessage>(&buf)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+fn validate_message_payload_size(
+    msg: &NetworkMessage,
+    max_tx_bytes: usize,
+    max_block_bytes: usize,
+    max_evidence_bytes: usize,
+) -> std::io::Result<()> {
+    match msg {
+        NetworkMessage::TransactionGossip(tx) => {
+            let sz = bincode::serialized_size(tx)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
+                as usize;
+            if sz > max_tx_bytes {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Transaction payload too large",
+                ));
+            }
+        }
+        NetworkMessage::BlockProposal(block) => {
+            let sz = bincode::serialized_size(block)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
+                as usize;
+            if sz > max_block_bytes {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Block payload too large",
+                ));
+            }
+        }
+        NetworkMessage::Proposal(p) => {
+            let sz = bincode::serialized_size(&p.block)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
+                as usize;
+            if sz > max_block_bytes {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Proposal block payload too large",
+                ));
+            }
+        }
+        NetworkMessage::Evidence(e) => {
+            let sz = bincode::serialized_size(e)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
+                as usize;
+            if sz > max_evidence_bytes {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Evidence payload too large",
+                ));
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
 }

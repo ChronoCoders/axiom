@@ -7,7 +7,8 @@ use axiom_mempool::Mempool;
 use axiom_network::{Network, NetworkConfig, NetworkMessage};
 use axiom_primitives::{
     AccountId, Block, BlockHash, Evidence, LockState, ProtocolVersion, PublicKey, Signature,
-    Transaction, TransactionType, ValidatorId, ValidatorSignature, VotePhase, PROTOCOL_VERSION,
+    Transaction, TransactionType, ValidatorId, ValidatorSignature, VotePhase, MAX_BLOCK_SIZE_BYTES,
+    PROTOCOL_VERSION,
 };
 use axiom_storage::Storage;
 use axum_server::tls_rustls::RustlsConfig;
@@ -200,6 +201,13 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
         local_height: height,
         local_genesis_hash: genesis_hash,
         local_protocol_version: PROTOCOL_VERSION,
+        max_message_bytes: 2 * MAX_BLOCK_SIZE_BYTES,
+        max_tx_bytes,
+        max_block_bytes: 2 * MAX_BLOCK_SIZE_BYTES,
+        max_evidence_bytes: 131_072,
+        max_messages_per_sec: 200,
+        handshake_timeout: Duration::from_secs(5),
+        max_handshake_messages: 32,
     };
 
     let (net_tx, mut net_rx, peer_map) =
