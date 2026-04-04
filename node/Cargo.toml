@@ -27,7 +27,8 @@ tokio = { version = "1.0", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
-rustls = { version = "0.23", features = ["ring"] }
+# Pin minimum patch so Cargo.lock keeps a modern aws-lc-rs / rustls-webpki / quinn-proto stack (cargo audit).
+rustls = { version = "0.23.37", features = ["ring"] }
 
 [dev-dependencies]
 axiom-execution = { path = "../execution" }

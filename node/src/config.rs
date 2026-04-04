@@ -209,6 +209,18 @@ impl AppConfig {
                 "console.password cannot be empty".to_string(),
             ));
         }
+        if self.api.tls_enabled {
+            if self.api.tls_cert_path.is_none() {
+                return Err(ConfigError::Message(
+                    "api.tls_cert_path must be set when api.tls_enabled is true".to_string(),
+                ));
+            }
+            if self.api.tls_key_path.is_none() {
+                return Err(ConfigError::Message(
+                    "api.tls_key_path must be set when api.tls_enabled is true".to_string(),
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -265,8 +277,8 @@ pub struct CliArgs {
     pub mempool_max_tx_bytes: Option<u64>,
     #[arg(long)]
     pub console_user: Option<String>,
-    #[arg(long)]
-    pub console_password: Option<String>,
+    // console_password is intentionally omitted from CLI args to prevent exposure
+    // in process listings. Set it via the config file or AXIOM__CONSOLE__PASSWORD env var.
     // Validator private key loaded from AXIOM_VALIDATOR_PRIVATE_KEY env var (CODING_RULES 5.3)
 }
 
@@ -353,9 +365,6 @@ impl AppConfig {
         }
         if let Some(v) = args.console_user {
             builder = builder.set_override("console.user", v)?;
-        }
-        if let Some(v) = args.console_password {
-            builder = builder.set_override("console.password", v)?;
         }
 
         builder.build()?.try_deserialize()

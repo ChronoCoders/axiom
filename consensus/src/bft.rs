@@ -38,6 +38,9 @@ pub struct Engine {
     lock: LockState,
     proposals_by_round: HashMap<u64, Proposal>,
     proposal_hash_by_round: HashMap<u64, BlockHash>,
+    /// Inverse map: block hash → block, populated alongside proposals_by_round.
+    /// Enables O(1) lookup in block_for_hash instead of O(rounds) linear scan.
+    proposal_block_by_hash: HashMap<BlockHash, Block>,
     own_votes_sent: HashSet<(u64, u64, VotePhase)>,
     prevotes: HashMap<u64, HashMap<ValidatorId, Vote>>,
     precommits: HashMap<u64, HashMap<ValidatorId, Vote>>,
@@ -54,6 +57,7 @@ impl Engine {
             lock,
             proposals_by_round: HashMap::new(),
             proposal_hash_by_round: HashMap::new(),
+            proposal_block_by_hash: HashMap::new(),
             own_votes_sent: HashSet::new(),
             prevotes: HashMap::new(),
             precommits: HashMap::new(),
@@ -139,6 +143,12 @@ impl Engine {
 
         if proposal.round < self.round {
             return Ok(vec![]);
+        }
+
+        if proposal.round > self.round {
+            // Advance to the proposer's round so we can participate.
+            self.round = proposal.round;
+            self.step = Step::Proposal;
         }
 
         if proposal.round == self.round {
@@ -346,41 +356,42 @@ impl Engine {
                 }
                 round_votes.insert(vote.validator_id, vote);
 
-                if let Some((Some(hash), _)) =
-                    self.find_supermajority(state, staking, VotePhase::Precommit, self.round)
-                {
-                    if let Some(block) = self.block_for_hash(hash) {
-                        let mut committed = block.clone();
-                        committed.signatures = self
-                            .precommits
-                            .get(&self.round)
-                            .into_iter()
-                            .flat_map(|m| m.values())
-                            .filter(|v| v.block_hash == Some(hash))
-                            .map(|v| ValidatorSignature {
-                                validator_id: v.validator_id,
-                                signature: v.signature,
-                            })
-                            .collect();
-                        outs.push(Outbound::CommittedBlock(committed));
-                        return Ok(outs);
+                // Call find_supermajority once and branch on the result.
+                match self.find_supermajority(state, staking, VotePhase::Precommit, self.round) {
+                    Some((Some(hash), _)) => {
+                        if let Some(block) = self.block_for_hash(hash) {
+                            let mut committed = block.clone();
+                            committed.signatures = self
+                                .precommits
+                                .get(&self.round)
+                                .into_iter()
+                                .flat_map(|m| m.values())
+                                .filter(|v| v.block_hash == Some(hash))
+                                .map(|v| ValidatorSignature {
+                                    validator_id: v.validator_id,
+                                    signature: v.signature,
+                                })
+                                .collect();
+                            outs.push(Outbound::CommittedBlock(committed));
+                        }
                     }
-                }
-
-                if let Some((None, _)) =
-                    self.find_supermajority(state, staking, VotePhase::Precommit, self.round)
-                {
-                    self.round = self.round.saturating_add(1);
-                    self.step = Step::Proposal;
-                    outs.push(Outbound::AdvanceRound {
-                        height: self.height,
-                        round: self.round,
-                    });
+                    Some((None, _)) => {
+                        self.round = self.round.saturating_add(1);
+                        self.step = Step::Proposal;
+                        // Prune vote maps for rounds more than 1 behind current.
+                        let cur = self.round;
+                        self.prevotes.retain(|r, _| *r + 1 >= cur);
+                        self.precommits.retain(|r, _| *r + 1 >= cur);
+                        outs.push(Outbound::AdvanceRound {
+                            height: self.height,
+                            round: self.round,
+                        });
+                    }
+                    None => {}
                 }
             }
         }
 
-        let _ = state;
         Ok(outs)
     }
 
@@ -423,6 +434,8 @@ impl Engine {
 
     fn store_proposal(&mut self, proposal: Proposal, hash: BlockHash) {
         let round = proposal.round;
+        self.proposal_block_by_hash
+            .insert(hash, proposal.block.clone());
         self.proposals_by_round.insert(round, proposal);
         self.proposal_hash_by_round.insert(round, hash);
     }
@@ -544,12 +557,6 @@ impl Engine {
     }
 
     fn block_for_hash(&self, hash: BlockHash) -> Option<&Block> {
-        for proposal in self.proposals_by_round.values() {
-            let h = compute_block_hash(&proposal.block);
-            if h == hash {
-                return Some(&proposal.block);
-            }
-        }
-        None
+        self.proposal_block_by_hash.get(&hash)
     }
 }

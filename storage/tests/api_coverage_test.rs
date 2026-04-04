@@ -107,14 +107,14 @@ fn test_block_lookups_round_trip() {
     storage.commit_block(&block1, &state).unwrap();
 
     // 1. Lookup by Height
-    let retrieved_by_height = storage
+    let (retrieved_by_height, _hash_str) = storage
         .get_block_by_height(1)
         .unwrap()
         .expect("Block 1 should exist");
     assert_eq!(retrieved_by_height, block1);
 
     // 2. Lookup by Hash
-    let retrieved_by_hash = storage
+    let (retrieved_by_hash, _hash_str2) = storage
         .get_block_by_hash(&block1_hash)
         .unwrap()
         .expect("Block 1 should exist by hash");

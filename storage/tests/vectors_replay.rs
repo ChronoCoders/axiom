@@ -224,7 +224,7 @@ fn test_vector_9_replay_test() {
     let mut replay_block_hash = genesis_hash;
     let mut replay_height = 0;
 
-    let loaded_block_1 = storage
+    let (loaded_block_1, _) = storage
         .get_block_by_height(1)
         .unwrap()
         .expect("Block 1 missing");
@@ -238,7 +238,7 @@ fn test_vector_9_replay_test() {
     replay_block_hash = compute_block_hash(&loaded_block_1);
     replay_height = 1;
 
-    let loaded_block_2 = storage
+    let (loaded_block_2, _) = storage
         .get_block_by_height(2)
         .unwrap()
         .expect("Block 2 missing");

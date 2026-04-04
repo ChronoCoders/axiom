@@ -357,32 +357,53 @@ impl Storage {
         Ok(())
     }
 
-    /// Get block by height
-    pub fn get_block_by_height(&self, height: u64) -> Result<Option<Block>> {
+    /// Get a range of blocks in descending height order using a single SQL query.
+    /// Returns (Block, stored_hash_hex) pairs, most-recent first.
+    pub fn get_blocks_range(&self, end_height: u64, limit: usize) -> Result<Vec<(Block, String)>> {
         let conn = self.conn.lock().map_err(|_| StorageError::LockPoisoned)?;
-        let mut stmt = conn.prepare("SELECT block_data FROM blocks WHERE height = ?1")?;
+        let mut stmt = conn.prepare(
+            "SELECT block_data, hash FROM blocks WHERE height <= ?1 ORDER BY height DESC LIMIT ?2",
+        )?;
+        let mut rows = stmt.query(params![end_height, limit as i64])?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next()? {
+            let data: Vec<u8> = row.get(0)?;
+            let hash: String = row.get(1)?;
+            let block: Block = serde_json::from_slice(&data)?;
+            results.push((block, hash));
+        }
+        Ok(results)
+    }
+
+    /// Get block by height. Returns (Block, stored_hash_hex) or None.
+    pub fn get_block_by_height(&self, height: u64) -> Result<Option<(Block, String)>> {
+        let conn = self.conn.lock().map_err(|_| StorageError::LockPoisoned)?;
+        let mut stmt =
+            conn.prepare("SELECT block_data, hash FROM blocks WHERE height = ?1")?;
         let mut rows = stmt.query(params![height])?;
 
         if let Some(row) = rows.next()? {
             let data: Vec<u8> = row.get(0)?;
-            // Decode block
+            let hash: String = row.get(1)?;
             let block: Block = serde_json::from_slice(&data)?;
-            Ok(Some(block))
+            Ok(Some((block, hash)))
         } else {
             Ok(None)
         }
     }
 
-    /// Get block by hash
-    pub fn get_block_by_hash(&self, hash: &BlockHash) -> Result<Option<Block>> {
+    /// Get block by hash. Returns (Block, stored_hash_hex) or None.
+    pub fn get_block_by_hash(&self, hash: &BlockHash) -> Result<Option<(Block, String)>> {
         let conn = self.conn.lock().map_err(|_| StorageError::LockPoisoned)?;
-        let mut stmt = conn.prepare("SELECT block_data FROM blocks WHERE hash = ?1")?;
+        let mut stmt =
+            conn.prepare("SELECT block_data, hash FROM blocks WHERE hash = ?1")?;
         let mut rows = stmt.query(params![hash.to_string()])?;
 
         if let Some(row) = rows.next()? {
             let data: Vec<u8> = row.get(0)?;
+            let stored_hash: String = row.get(1)?;
             let block: Block = serde_json::from_slice(&data)?;
-            Ok(Some(block))
+            Ok(Some((block, stored_hash)))
         } else {
             Ok(None)
         }

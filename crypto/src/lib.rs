@@ -287,6 +287,16 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.ct_eq(b).into()
 }
 
+/// Compares two byte slices in constant time, regardless of their lengths.
+/// Both slices are hashed with SHA-256 first so the comparison always
+/// operates on fixed-size 32-byte digests, preventing length timing leaks.
+pub fn ct_compare(a: &[u8], b: &[u8]) -> bool {
+    use subtle::ConstantTimeEq;
+    let ha = sha256(a);
+    let hb = sha256(b);
+    ha.ct_eq(&hb).into()
+}
+
 // Key handling helpers
 
 pub fn generate_keypair_from_seed(seed: &[u8; 32]) -> (PrivateKey, PublicKey) {

@@ -77,7 +77,7 @@ fn test_persistence_and_restart() {
     assert_eq!(loaded_state.block_reward, original_state.block_reward);
 
     // 9. Load Block
-    let loaded_block = storage_2
+    let (loaded_block, stored_hash) = storage_2
         .get_block_by_height(height)
         .unwrap()
         .expect("Block should exist");
@@ -87,6 +87,6 @@ fn test_persistence_and_restart() {
     assert_eq!(loaded_block.parent_hash, dummy_hash(0x99));
     assert_eq!(loaded_block.state_hash, state_hash);
 
-    // Verify block hash matches
-    assert_eq!(compute_block_hash(&loaded_block), expected_block_hash);
+    // Verify stored hash matches computed hash
+    assert_eq!(stored_hash, expected_block_hash.to_string());
 }

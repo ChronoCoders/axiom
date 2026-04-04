@@ -15,7 +15,6 @@ use axum_server::tls_rustls::RustlsConfig;
 use ed25519_dalek::SigningKey;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -221,10 +220,9 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
         storage: storage.clone(),
         mempool: mempool.clone(),
         peers: peer_map,
-        auth_tokens: Arc::new(RwLock::new(HashSet::new())),
+        auth_tokens: Arc::new(RwLock::new(std::collections::HashMap::new())),
         console_user: config.console.user.clone(),
         console_pass: config.console.password.clone(),
-        token_counter: AtomicU64::new(0),
         max_tx_bytes,
     });
 
@@ -544,7 +542,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
 
             if let (Some(val_id), Some(sk)) = (&my_validator_id, &my_private_key) {
                 let parent_block = match storage.get_block_by_height(height) {
-                    Ok(Some(b)) => b,
+                    Ok(Some((b, _))) => b,
                     Ok(None) => {
                         tracing::error!("Missing parent block at height {height}");
                         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -766,7 +764,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                             };
 
                             let parent_block = match storage.get_block_by_height(height) {
-                                Ok(Some(b)) => b,
+                                Ok(Some((b, _))) => b,
                                 Ok(None) => {
                                     tracing::error!("Missing parent block at height {height}");
                                     continue;
@@ -1037,7 +1035,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                         }
                                     };
                                     let parent_block = match storage.get_block_by_height(height) {
-                                        Ok(Some(b)) => b,
+                                        Ok(Some((b, _))) => b,
                                         _ => continue,
                                     };
                                     let parent_hash = compute_block_hash(&parent_block);
@@ -1148,7 +1146,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
 
                     // Get parent block
                     let parent_block = match storage.get_block_by_height(height) {
-                        Ok(Some(b)) => b,
+                        Ok(Some((b, _))) => b,
                         Ok(None) => {
                             tracing::error!("Missing parent block at height {height}");
                             continue;
@@ -1310,7 +1308,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
 
                         // Get parent hash again
                         let parent_block = match storage.get_block_by_height(height) {
-                            Ok(Some(b)) => b,
+                            Ok(Some((b, _))) => b,
                             Ok(None) => {
                                 tracing::error!("Missing parent block at height {height}");
                                 continue;

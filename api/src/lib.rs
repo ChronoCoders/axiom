@@ -16,13 +16,11 @@ use axum::{
     BoxError, Router,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tower::buffer::BufferLayer;
 use tower::limit::RateLimitLayer;
 use tower::load_shed::LoadShedLayer;
@@ -32,6 +30,9 @@ use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 use tokio::sync::RwLock;
 
+/// Token TTL: 8 hours.
+const TOKEN_TTL: Duration = Duration::from_secs(8 * 60 * 60);
+
 /// Shared application state passed to all API handlers.
 pub struct AppState {
     /// Persistent block and state storage.
@@ -40,14 +41,12 @@ pub struct AppState {
     pub mempool: Arc<Mutex<Mempool>>,
     /// Live map of connected P2P peers.
     pub peers: PeerMap,
-    /// Active auth tokens for the console UI (in-memory).
-    pub auth_tokens: Arc<RwLock<HashSet<String>>>,
+    /// Active auth tokens for the console UI (token → expiry instant).
+    pub auth_tokens: Arc<RwLock<HashMap<String, Instant>>>,
     /// Console login username.
     pub console_user: String,
     /// Console login password.
     pub console_pass: String,
-    /// Monotonic counter for token generation uniqueness.
-    pub token_counter: AtomicU64,
     /// Maximum size of a single transaction in canonical bytes.
     pub max_tx_bytes: usize,
 }
@@ -127,23 +126,27 @@ async fn auth_login(
     State(state): State<Arc<AppState>>,
     Json(req): Json<AuthLoginRequest>,
 ) -> Result<Json<AuthLoginResponse>, (StatusCode, Json<ApiError>)> {
-    if req.username != state.console_user || req.password != state.console_pass {
+    // Constant-time credential comparison to prevent timing attacks.
+    let user_ok = axiom_crypto::ct_compare(req.username.as_bytes(), state.console_user.as_bytes());
+    let pass_ok = axiom_crypto::ct_compare(req.password.as_bytes(), state.console_pass.as_bytes());
+    if !user_ok || !pass_ok {
         return Err((
             StatusCode::UNAUTHORIZED,
             Json(ApiError::new("Invalid credentials", "unauthorized")),
         ));
     }
 
-    let now_nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    let n = state.token_counter.fetch_add(1, Ordering::Relaxed);
-    let token_material = format!("{}:{}:{}:{}", req.username, now_nanos, n, req.password);
-    let token = hex::encode(axiom_crypto::sha256(token_material.as_bytes()));
+    // Generate a cryptographically random token (32 bytes from OsRng).
+    let mut raw = [0u8; 32];
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut raw);
+    let token = hex::encode(raw);
 
+    let expiry = Instant::now() + TOKEN_TTL;
     let mut tokens = state.auth_tokens.write().await;
-    tokens.insert(token.clone());
+    // Prune any expired tokens on each login to keep the map bounded.
+    let now = Instant::now();
+    tokens.retain(|_, exp| *exp > now);
+    tokens.insert(token.clone(), expiry);
 
     Ok(Json(AuthLoginResponse { token }))
 }
@@ -153,7 +156,8 @@ async fn auth_verify(
     Json(req): Json<AuthTokenRequest>,
 ) -> Result<Json<AuthVerifyResponse>, StatusCode> {
     let tokens = state.auth_tokens.read().await;
-    if tokens.contains(&req.token) {
+    let now = Instant::now();
+    if tokens.get(&req.token).is_some_and(|exp| *exp > now) {
         Ok(Json(AuthVerifyResponse { valid: true }))
     } else {
         Err(StatusCode::UNAUTHORIZED)
@@ -166,7 +170,19 @@ async fn auth_logout(
 ) -> Json<AuthLogoutResponse> {
     let mut tokens = state.auth_tokens.write().await;
     tokens.remove(&req.token);
+    // Also prune expired tokens opportunistically.
+    let now = Instant::now();
+    tokens.retain(|_, exp| *exp > now);
     Json(AuthLogoutResponse { ok: true })
+}
+
+/// Converts a storage error into an HTTP 500 ApiError response.
+/// Used as a one-liner in every handler: `.map_err(storage_err)?`
+fn storage_err(e: impl std::fmt::Display) -> (StatusCode, Json<ApiError>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ApiError::new(e.to_string(), "storage_error")),
+    )
 }
 
 // Status
@@ -188,54 +204,31 @@ struct StatusResponse {
 async fn status(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<StatusResponse>, (StatusCode, Json<ApiError>)> {
-    let height = state.storage.get_latest_height().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
-    let genesis_hash = state.storage.get_genesis_hash().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
+    let height = state.storage.get_latest_height().map_err(storage_err)?;
+    let genesis_hash = state.storage.get_genesis_hash().map_err(storage_err)?;
 
-    // Get latest block hash
-    let latest_block = state.storage.get_block_by_height(height).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
+    // Use the stored hash and timestamp from the latest block row (no recomputation).
+    let (latest_block_hash, latest_block_timestamp) =
+        match state.storage.get_blocks_range(height, 1).map_err(storage_err)?.into_iter().next() {
+            Some((block, hash)) => (hash, block.timestamp),
+            None => (String::new(), 0u64),
+        };
 
-    let latest_block_hash = if let Some(block) = latest_block {
-        axiom_crypto::compute_block_hash(&block).to_string()
-    } else {
-        String::new()
-    };
+    let validators = state.storage.get_validators().map_err(storage_err)?;
 
-    let validators = state.storage.get_validators().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
-
-    let peer_count = state
-        .peers
-        .lock()
-        .map(|m| m.len())
-        .unwrap_or(0);
-
-    let mempool_size = state
-        .mempool
-        .lock()
-        .map(|m| m.size())
-        .unwrap_or(0);
+    let peer_count = state.peers.lock().map(|m| m.len()).unwrap_or(0);
+    let mempool_size = state.mempool.lock().map(|m| m.size()).unwrap_or(0);
 
     let next_height = height.saturating_add(1);
     let next_protocol_version = ProtocolVersion::for_height(next_height).as_u64();
+
+    // Heuristic: if the latest block is more than 60 seconds old and we have
+    // committed at least one block, the node is likely behind or stalled.
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let syncing = height > 0 && now_secs.saturating_sub(latest_block_timestamp) > 60;
 
     Ok(Json(StatusResponse {
         protocol_version: PROTOCOL_VERSION,
@@ -248,31 +241,16 @@ async fn status(
         validator_count: validators.len(),
         peer_count,
         mempool_size,
-        syncing: false, // Always false for now
+        syncing,
     }))
 }
 
 async fn metrics(
     State(state): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let height = state.storage.get_latest_height().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
-    let genesis_hash = state.storage.get_genesis_hash().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
-    let validators = state.storage.get_validators().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
+    let height = state.storage.get_latest_height().map_err(storage_err)?;
+    let genesis_hash = state.storage.get_genesis_hash().map_err(storage_err)?;
+    let validators = state.storage.get_validators().map_err(storage_err)?;
 
     let peer_count = state
         .peers
@@ -334,41 +312,29 @@ async fn list_blocks(
     Query(params): Query<ListBlocksParams>,
 ) -> Result<Json<Vec<BlockSummary>>, (StatusCode, Json<ApiError>)> {
     let limit = params.limit.unwrap_or(50).min(1000);
-    let latest_height = state.storage.get_latest_height().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
+    let latest_height = state.storage.get_latest_height().map_err(storage_err)?;
 
-    let start_height = match params.cursor {
+    let end_height = match params.cursor {
         Some(0) => return Ok(Json(Vec::new())),
         Some(c) => std::cmp::min(c.saturating_sub(1), latest_height),
         None => latest_height,
     };
-    let mut blocks = Vec::new();
 
-    // Iterate backwards from start_height
-    for h in (0..=start_height).rev().take(limit) {
-        if let Some(block) = state.storage.get_block_by_height(h).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiError::new(e.to_string(), "storage_error")),
-            )
-        })? {
-            let hash = axiom_crypto::compute_block_hash(&block);
-            blocks.push(BlockSummary {
-                height: block.height,
-                hash: hash.to_string(),
-                parent_hash: block.parent_hash.to_string(),
-                epoch: block.epoch,
-                proposer_id: block.proposer_id.to_string(),
-                transaction_count: block.transactions.len(),
-                state_hash: block.state_hash.to_string(),
-                timestamp: format_unix_timestamp(block.timestamp),
-            });
-        }
-    }
+    // Single ranged query — no N sequential round-trips.
+    let rows = state.storage.get_blocks_range(end_height, limit).map_err(storage_err)?;
+    let blocks = rows
+        .into_iter()
+        .map(|(block, hash)| BlockSummary {
+            height: block.height,
+            hash, // use the stored hash, no recomputation
+            parent_hash: block.parent_hash.to_string(),
+            epoch: block.epoch,
+            proposer_id: block.proposer_id.to_string(),
+            transaction_count: block.transactions.len(),
+            state_hash: block.state_hash.to_string(),
+            timestamp: format_unix_timestamp(block.timestamp),
+        })
+        .collect();
 
     Ok(Json(blocks))
 }
@@ -385,19 +351,11 @@ async fn get_block_by_height(
     State(state): State<Arc<AppState>>,
     Path(height): Path<u64>,
 ) -> Result<Json<BlockDetail>, (StatusCode, Json<ApiError>)> {
-    let block = state.storage.get_block_by_height(height).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
-
-    if let Some(block) = block {
-        let hash = axiom_crypto::compute_block_hash(&block);
-        Ok(Json(BlockDetail {
+    match state.storage.get_block_by_height(height).map_err(storage_err)? {
+        Some((block, hash)) => Ok(Json(BlockDetail {
             summary: BlockSummary {
                 height: block.height,
-                hash: hash.to_string(),
+                hash, // stored hash, no recomputation
                 parent_hash: block.parent_hash.to_string(),
                 epoch: block.epoch,
                 proposer_id: block.proposer_id.to_string(),
@@ -407,12 +365,11 @@ async fn get_block_by_height(
             },
             transactions: block.transactions,
             signatures: block.signatures,
-        }))
-    } else {
-        Err((
+        })),
+        None => Err((
             StatusCode::NOT_FOUND,
             Json(ApiError::new("Block not found", "not_found")),
-        ))
+        )),
     }
 }
 
@@ -438,18 +395,11 @@ async fn get_block_by_hash(
     arr.copy_from_slice(&bytes);
     let hash = BlockHash(arr);
 
-    let block = state.storage.get_block_by_hash(&hash).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
-
-    if let Some(block) = block {
-        Ok(Json(BlockDetail {
+    match state.storage.get_block_by_hash(&hash).map_err(storage_err)? {
+        Some((block, stored_hash)) => Ok(Json(BlockDetail {
             summary: BlockSummary {
                 height: block.height,
-                hash: hash.to_string(),
+                hash: stored_hash, // stored hash, no recomputation
                 parent_hash: block.parent_hash.to_string(),
                 epoch: block.epoch,
                 proposer_id: block.proposer_id.to_string(),
@@ -459,12 +409,11 @@ async fn get_block_by_hash(
             },
             transactions: block.transactions,
             signatures: block.signatures,
-        }))
-    } else {
-        Err((
+        })),
+        None => Err((
             StatusCode::NOT_FOUND,
             Json(ApiError::new("Block not found", "not_found")),
-        ))
+        )),
     }
 }
 
@@ -498,12 +447,7 @@ async fn get_account(
     arr.copy_from_slice(&bytes);
     let account_id = AccountId(arr);
 
-    let account = state.storage.get_account(&account_id).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
+    let account = state.storage.get_account(&account_id).map_err(storage_err)?;
 
     if let Some(account) = account {
         Ok(Json(AccountResponse {
@@ -535,25 +479,9 @@ struct ValidatorResponse {
 async fn list_validators(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<ValidatorResponse>>, (StatusCode, Json<ApiError>)> {
-    let validators = state.storage.get_validators().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
-
-    let latest_height = state.storage.get_latest_height().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
-    let staking = state.storage.load_staking_state().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
+    let validators = state.storage.get_validators().map_err(storage_err)?;
+    let latest_height = state.storage.get_latest_height().map_err(storage_err)?;
+    let staking = state.storage.load_staking_state().map_err(storage_err)?;
 
     let mut stake_map: BTreeMap<ValidatorId, u64> = BTreeMap::new();
     for (vid, amt) in &staking.stakes {
@@ -619,19 +547,8 @@ struct StakingResponse {
 async fn get_staking(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<StakingResponse>, (StatusCode, Json<ApiError>)> {
-    let latest_height = state.storage.get_latest_height().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
-
-    let staking = state.storage.load_staking_state().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
+    let latest_height = state.storage.get_latest_height().map_err(storage_err)?;
+    let staking = state.storage.load_staking_state().map_err(storage_err)?;
 
     let enabled = latest_height >= V2_ACTIVATION_HEIGHT;
     let stakes = staking
@@ -679,20 +596,10 @@ struct ConsensusResponse {
 async fn get_consensus(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ConsensusResponse>, (StatusCode, Json<ApiError>)> {
-    let height = state.storage.get_latest_height().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
+    let height = state.storage.get_latest_height().map_err(storage_err)?;
     let next_height = height.saturating_add(1);
     let protocol_version = ProtocolVersion::for_height(next_height).as_u64();
-    let lock = state.storage.load_lock_state().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
+    let lock = state.storage.load_lock_state().map_err(storage_err)?;
     Ok(Json(ConsensusResponse {
         next_height,
         protocol_version,
@@ -793,12 +700,7 @@ async fn submit_transaction(
     State(state): State<Arc<AppState>>,
     Json(tx): Json<Transaction>,
 ) -> Result<(StatusCode, Json<SubmitTransactionResponse>), (StatusCode, Json<ApiError>)> {
-    let latest_height = state.storage.get_latest_height().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
+    let latest_height = state.storage.get_latest_height().map_err(storage_err)?;
     let next_height = latest_height.saturating_add(1);
     let version = ProtocolVersion::for_height(next_height);
 
@@ -870,12 +772,7 @@ async fn submit_transaction(
     // We need current state to check balance/nonce
     // In a real high-throughput system we might check this against mempool + state,
     // but for V1 checking against committed state is safer/simpler (conservative).
-    let sender_account = state.storage.get_account(&tx.sender).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(e.to_string(), "storage_error")),
-        )
-    })?;
+    let sender_account = state.storage.get_account(&tx.sender).map_err(storage_err)?;
 
     if let Some(account) = sender_account {
         if tx.nonce < account.nonce {
@@ -908,12 +805,7 @@ async fn submit_transaction(
 
     if version == ProtocolVersion::V2 && (tx.tx_type == TransactionType::Stake || tx.tx_type == TransactionType::Unstake) {
         let vid = ValidatorId(tx.sender.0);
-        let validator = state.storage.get_validator(&vid).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiError::new(e.to_string(), "storage_error")),
-            )
-        })?;
+        let validator = state.storage.get_validator(&vid).map_err(storage_err)?;
 
         let Some(v) = validator else {
             return Err((
@@ -934,10 +826,7 @@ async fn submit_transaction(
 
         if tx.tx_type == TransactionType::Unstake {
             let staking = state.storage.load_staking_state().map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiError::new(e.to_string(), "storage_error")),
-                )
+                storage_err(e)
             })?;
 
             let effective_stake = if next_height == axiom_primitives::V2_ACTIVATION_HEIGHT

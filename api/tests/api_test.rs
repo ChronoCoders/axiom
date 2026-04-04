@@ -7,9 +7,8 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 use tower::Service;
@@ -47,10 +46,9 @@ async fn setup_app() -> (
         storage: storage_arc.clone(),
         mempool: mempool_arc.clone(),
         peers: Arc::new(Mutex::new(HashMap::new())),
-        auth_tokens: Arc::new(RwLock::new(HashSet::new())),
+        auth_tokens: Arc::new(RwLock::new(HashMap::new())),
         console_user: "operator".to_string(),
         console_pass: "axiom".to_string(),
-        token_counter: AtomicU64::new(0),
         max_tx_bytes: 65536,
     });
 

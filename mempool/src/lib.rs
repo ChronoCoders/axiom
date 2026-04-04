@@ -26,13 +26,13 @@ impl Mempool {
         }
     }
 
-    /// Adds a transaction to the mempool.
+    /// Adds a transaction to the mempool using the V1 (height-0) hash.
     ///
-    /// # Validation
-    /// This method does NOT validate the transaction signature.
-    /// It assumes the caller (API or Network layer) has already performed cryptographic verification.
-    ///
-    /// Returns error if full or duplicate.
+    /// # Deprecated
+    /// Use [`add_for_height`] instead. This method always computes the hash at height 0
+    /// (V1 serialization), which diverges from `add_for_height` for V2-era heights and
+    /// can produce duplicate entries for the same transaction.
+    #[deprecated(note = "Use add_for_height(height, tx) to ensure correct hash versioning")]
     pub fn add(&mut self, tx: Transaction) -> Result<(), MempoolError> {
         let hash = compute_transaction_hash_for_height(0, &tx);
 
@@ -129,7 +129,7 @@ mod tests {
     fn test_add_transaction() {
         let mut pool = Mempool::new(10);
         let tx = create_dummy_tx(0);
-        assert!(pool.add(tx).is_ok());
+        assert!(pool.add_for_height(0, tx).is_ok());
         assert_eq!(pool.size(), 1);
     }
 
@@ -137,17 +137,17 @@ mod tests {
     fn test_duplicate_transaction() {
         let mut pool = Mempool::new(10);
         let tx = create_dummy_tx(0);
-        pool.add(tx.clone()).unwrap();
-        assert!(matches!(pool.add(tx), Err(MempoolError::Duplicate)));
+        pool.add_for_height(0, tx.clone()).unwrap();
+        assert!(matches!(pool.add_for_height(0, tx), Err(MempoolError::Duplicate)));
     }
 
     #[test]
     fn test_capacity_limit() {
         let mut pool = Mempool::new(2);
-        pool.add(create_dummy_tx(1)).unwrap();
-        pool.add(create_dummy_tx(2)).unwrap();
+        pool.add_for_height(0, create_dummy_tx(1)).unwrap();
+        pool.add_for_height(0, create_dummy_tx(2)).unwrap();
         assert!(matches!(
-            pool.add(create_dummy_tx(3)),
+            pool.add_for_height(0, create_dummy_tx(3)),
             Err(MempoolError::Full)
         ));
     }
@@ -157,8 +157,8 @@ mod tests {
         let mut pool = Mempool::new(10);
         let tx1 = create_dummy_tx(1);
         let tx2 = create_dummy_tx(2);
-        pool.add(tx1.clone()).unwrap();
-        pool.add(tx2.clone()).unwrap();
+        pool.add_for_height(0, tx1.clone()).unwrap();
+        pool.add_for_height(0, tx2.clone()).unwrap();
 
         let batch = pool.get_batch(2);
         assert_eq!(
@@ -178,8 +178,8 @@ mod tests {
         let tx2 = create_dummy_tx(2);
         let hash1 = compute_transaction_hash_for_height(0, &tx1);
 
-        pool.add(tx1).unwrap();
-        pool.add(tx2).unwrap();
+        pool.add_for_height(0, tx1).unwrap();
+        pool.add_for_height(0, tx2).unwrap();
 
         pool.remove_batch(std::slice::from_ref(&hash1));
         assert!(!pool.contains(&hash1));
@@ -189,8 +189,8 @@ mod tests {
     #[test]
     fn test_get_batch_exceeding_size() {
         let mut pool = Mempool::new(10);
-        pool.add(create_dummy_tx(1)).unwrap();
-        pool.add(create_dummy_tx(2)).unwrap();
+        pool.add_for_height(0, create_dummy_tx(1)).unwrap();
+        pool.add_for_height(0, create_dummy_tx(2)).unwrap();
 
         // Request 5, only have 2
         let batch = pool.get_batch(5);
@@ -208,7 +208,7 @@ mod tests {
     fn test_remove_batch_unknown() {
         let mut pool = Mempool::new(10);
         let tx = create_dummy_tx(1);
-        pool.add(tx).unwrap();
+        pool.add_for_height(0, tx).unwrap();
 
         let unknown_hash = TransactionHash([0u8; 32]);
         pool.remove_batch(&[unknown_hash]);

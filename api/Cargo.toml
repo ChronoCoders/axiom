@@ -11,6 +11,7 @@ axiom-mempool = { path = "../mempool" }
 axiom-network = { path = "../network" }
 axiom-crypto = { path = "../crypto" }
 axum = "0.7"
+rand = { version = "0.8", features = ["getrandom"] }
 hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 
