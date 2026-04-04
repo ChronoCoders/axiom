@@ -20,3 +20,5 @@ validator_key
 
 .env
 .DS_Store
+
+CLAUDE.md

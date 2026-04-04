@@ -103,6 +103,9 @@ async fn test_serialization_variants() {
             height: 5,
             genesis_hash: StateHash([9; 32]),
         },
+        NetworkMessage::BlockRequest(42),
+        NetworkMessage::BlockResponse(Some(dummy_block())),
+        NetworkMessage::BlockResponse(None),
     ];
 
     for msg in variants {
@@ -118,6 +121,8 @@ async fn test_serialization_variants() {
             (NetworkMessage::Evidence(_), NetworkMessage::Evidence(_)) => {}
             (NetworkMessage::StatusRequest, NetworkMessage::StatusRequest) => {}
             (NetworkMessage::StatusResponse { .. }, NetworkMessage::StatusResponse { .. }) => {}
+            (NetworkMessage::BlockRequest(_), NetworkMessage::BlockRequest(_)) => {}
+            (NetworkMessage::BlockResponse(_), NetworkMessage::BlockResponse(_)) => {}
             _ => panic!("Variant mismatch after serialization"),
         }
     }
@@ -125,6 +130,27 @@ async fn test_serialization_variants() {
 
 use tokio::net::TcpStream;
 use tokio::sync::broadcast;
+
+/// Receive the next non-StatusResponse message within the given timeout.
+/// StatusResponse messages are forwarded to net_rx so the node can detect lag;
+/// tests that wait for specific message types must skip them.
+async fn recv_skip_status(
+    rx: &mut tokio::sync::mpsc::Receiver<NetworkMessage>,
+    dur: Duration,
+) -> Option<NetworkMessage> {
+    let deadline = tokio::time::Instant::now() + dur;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return None;
+        }
+        match timeout(remaining, rx.recv()).await {
+            Ok(Some(NetworkMessage::StatusResponse { .. })) => continue,
+            Ok(msg) => return msg,
+            Err(_) => return None,
+        }
+    }
+}
 
 #[tokio::test]
 async fn test_peer_unavailable() {
@@ -227,10 +253,9 @@ async fn test_peer_reconnection() {
         .unwrap();
 
     // Check if B received it
-    match timeout(Duration::from_secs(2), rx_b.recv()).await {
-        Ok(Some(NetworkMessage::TransactionGossip(_))) => {}
-        Ok(x) => panic!("Expected TransactionGossip, got {x:?}"),
-        Err(_) => panic!("Timed out waiting for message"),
+    match recv_skip_status(&mut rx_b, Duration::from_secs(2)).await {
+        Some(NetworkMessage::TransactionGossip(_)) => {}
+        x => panic!("Expected TransactionGossip, got {x:?}"),
     }
 
     let _ = shutdown_tx_a.send(());
@@ -311,10 +336,9 @@ async fn test_3_node_communication() {
         .unwrap();
 
     // B receives
-    match timeout(Duration::from_secs(2), rx_b.recv()).await {
-        Ok(Some(NetworkMessage::TransactionGossip(_))) => {}
-        Ok(x) => panic!("B expected TransactionGossip, got {x:?}"),
-        Err(_) => panic!("B Timed out waiting for message"),
+    match recv_skip_status(&mut rx_b, Duration::from_secs(2)).await {
+        Some(NetworkMessage::TransactionGossip(_)) => {}
+        x => panic!("B expected TransactionGossip, got {x:?}"),
     }
 
     // B sends to C
@@ -323,10 +347,9 @@ async fn test_3_node_communication() {
         .unwrap();
 
     // C receives
-    match timeout(Duration::from_secs(2), rx_c.recv()).await {
-        Ok(Some(NetworkMessage::TransactionGossip(_))) => {}
-        Ok(x) => panic!("C expected TransactionGossip, got {x:?}"),
-        Err(_) => panic!("C Timed out waiting for message"),
+    match recv_skip_status(&mut rx_c, Duration::from_secs(2)).await {
+        Some(NetworkMessage::TransactionGossip(_)) => {}
+        x => panic!("C expected TransactionGossip, got {x:?}"),
     }
 
     // C sends to A
@@ -335,10 +358,9 @@ async fn test_3_node_communication() {
         .unwrap();
 
     // A receives
-    match timeout(Duration::from_secs(2), rx_a.recv()).await {
-        Ok(Some(NetworkMessage::TransactionGossip(_))) => {}
-        Ok(x) => panic!("A expected TransactionGossip, got {x:?}"),
-        Err(_) => panic!("A Timed out waiting for message"),
+    match recv_skip_status(&mut rx_a, Duration::from_secs(2)).await {
+        Some(NetworkMessage::TransactionGossip(_)) => {}
+        x => panic!("A expected TransactionGossip, got {x:?}"),
     }
 
     let _ = shutdown_tx_a.send(());
