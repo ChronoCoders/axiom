@@ -93,6 +93,8 @@ pub enum NetworkMessage {
         height: u64,
         genesis_hash: StateHash,
     },
+    BlockRequest(u64),           // request block at this height
+    BlockResponse(Option<Block>), // response: Some(block) or None if not found
 }
 
 /// Configuration for the P2P network layer.
@@ -484,7 +486,7 @@ async fn handle_incoming_connection(
                 NetworkMessage::StatusResponse {
                     protocol_version,
                     genesis_hash,
-                    ..
+                    height,
                 } => {
                     if protocol_version != local_protocol_version {
                         return Err(std::io::Error::new(
@@ -499,6 +501,18 @@ async fn handle_incoming_connection(
                         ));
                     }
                     verified = true;
+                    // Forward StatusResponse to the node so it can detect lag and trigger sync
+                    if let Err(e) = tx
+                        .send(NetworkMessage::StatusResponse {
+                            protocol_version,
+                            genesis_hash,
+                            height,
+                        })
+                        .await
+                    {
+                        error!("Failed to forward StatusResponse to node: {}", e);
+                        return Ok(());
+                    }
                 }
                 other => {
                     if !verified {
@@ -688,6 +702,17 @@ fn validate_message_payload_size(
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "Evidence payload too large",
+                ));
+            }
+        }
+        NetworkMessage::BlockResponse(Some(block)) => {
+            let sz = rmp_serde::to_vec(block)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
+                .len();
+            if sz > max_block_bytes {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "BlockResponse payload too large",
                 ));
             }
         }

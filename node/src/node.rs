@@ -494,11 +494,130 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
     let mut bft_engine: Option<BftEngine> = None;
     let mut bft_step_started_at: Option<std::time::Instant> = None;
 
+    // Block sync state
+    struct BlockSyncSession {
+        target_height: u64,
+        next_to_request: u64,
+    }
+    let mut sync_session: Option<BlockSyncSession> = None;
+    let mut sync_waiting = false;
+    let mut last_status_broadcast = std::time::Instant::now();
+    let status_broadcast_interval = Duration::from_secs(30);
+
     loop {
         if shutdown_rx.try_recv().is_ok() {
             tracing::info!("Consensus loop shutting down...");
             break;
         }
+
+        // Periodic StatusRequest broadcast so peers respond with their height.
+        if last_status_broadcast.elapsed() >= status_broadcast_interval {
+            let _ = net_tx.send(NetworkMessage::StatusRequest).await;
+            last_status_broadcast = std::time::Instant::now();
+        }
+
+        // ─── Block Sync Path ────────────────────────────────────────────────
+        // When we detect a peer is ahead (via StatusResponse), we enter a
+        // dedicated catch-up loop that bypasses BFT entirely until caught up.
+        if sync_session.is_some() {
+            // Send the next block request if we are not already waiting for one.
+            if !sync_waiting {
+                let req_h = sync_session.as_ref().unwrap().next_to_request;
+                tracing::info!("Sync: requesting block {}", req_h);
+                if net_tx.send(NetworkMessage::BlockRequest(req_h)).await.is_err() {
+                    sync_session = None;
+                } else {
+                    sync_waiting = true;
+                }
+            }
+
+            tokio::select! {
+                _ = shutdown_rx.recv() => {
+                    tracing::info!("Consensus loop shutting down...");
+                    break;
+                }
+                msg_opt = net_rx.recv() => {
+                    if let Some(msg) = msg_opt {
+                        match msg {
+                            // Serve block requests from other peers even while syncing.
+                            NetworkMessage::BlockRequest(req_h) => {
+                                let resp = match storage.get_block_by_height(req_h) {
+                                    Ok(Some((b, _))) => NetworkMessage::BlockResponse(Some(b)),
+                                    _ => NetworkMessage::BlockResponse(None),
+                                };
+                                let _ = net_tx.send(resp).await;
+                            }
+                            NetworkMessage::BlockResponse(maybe_block) => {
+                                if let Some(ref mut ss) = sync_session {
+                                    match maybe_block {
+                                        Some(block) if block.height == ss.next_to_request => {
+                                            let parent_h = block.height.saturating_sub(1);
+                                            match storage.get_block_by_height(parent_h) {
+                                                Ok(Some((parent, _))) => {
+                                                    let parent_hash = compute_block_hash(&parent);
+                                                    if let (Ok(mut sg), Ok(mut stk)) =
+                                                        (state.lock(), staking_state.lock())
+                                                    {
+                                                        match validate_and_commit_block(
+                                                            &sg, &stk, &block, &parent_hash, parent_h,
+                                                        ) {
+                                                            Ok((new_state, new_staking)) => {
+                                                                let ok = match ProtocolVersion::for_height(block.height) {
+                                                                    ProtocolVersion::V1 => {
+                                                                        storage.commit_block(&block, &new_state).is_ok()
+                                                                    }
+                                                                    ProtocolVersion::V2 => {
+                                                                        storage.commit_block_v2(&block, &new_state, &new_staking).is_ok()
+                                                                    }
+                                                                };
+                                                                if ok {
+                                                                    *sg = new_state;
+                                                                    *stk = new_staking;
+                                                                    current_height.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                                                    tracing::info!("Sync: committed block {}", block.height);
+                                                                    ss.next_to_request += 1;
+                                                                    sync_waiting = false;
+                                                                    if ss.next_to_request > ss.target_height {
+                                                                        sync_session = None;
+                                                                        tracing::info!("Block sync complete.");
+                                                                    }
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                tracing::warn!("Sync: block {} invalid: {e}", block.height);
+                                                                sync_session = None;
+                                                                sync_waiting = false;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                _ => {
+                                                    tracing::warn!("Sync: missing parent for block {}", ss.next_to_request);
+                                                    sync_session = None;
+                                                    sync_waiting = false;
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            tracing::warn!("Sync: unexpected BlockResponse, aborting sync");
+                                            sync_session = None;
+                                            sync_waiting = false;
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ = tokio::time::sleep(Duration::from_millis(500)) => {
+                    // Timeout waiting for BlockResponse — retry next iteration.
+                    sync_waiting = false;
+                }
+            }
+            continue;
+        }
+        // ─── End Block Sync Path ─────────────────────────────────────────────
 
         let height = current_height.load(std::sync::atomic::Ordering::SeqCst) as u64;
         let next_height = height + 1;
@@ -1113,6 +1232,24 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                         }
                                     }
                                 }
+                                NetworkMessage::StatusResponse { height: peer_height, .. } => {
+                                    let our_height = current_height.load(std::sync::atomic::Ordering::SeqCst) as u64;
+                                    if peer_height > our_height && sync_session.is_none() {
+                                        tracing::info!("Peer at height {peer_height}, we are at {our_height}. Starting block sync.");
+                                        sync_session = Some(BlockSyncSession {
+                                            target_height: peer_height,
+                                            next_to_request: our_height + 1,
+                                        });
+                                        sync_waiting = false;
+                                    }
+                                }
+                                NetworkMessage::BlockRequest(req_h) => {
+                                    let resp = match storage.get_block_by_height(req_h) {
+                                        Ok(Some((b, _))) => NetworkMessage::BlockResponse(Some(b)),
+                                        _ => NetworkMessage::BlockResponse(None),
+                                    };
+                                    let _ = net_tx.send(resp).await;
+                                }
                                 _ => {}
                             }
                         }
@@ -1710,6 +1847,24 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                             if !votes.iter().any(|v| v.validator_id == sig.validator_id) {
                                 votes.push(sig);
                             }
+                        }
+                        NetworkMessage::StatusResponse { height: peer_height, .. } => {
+                            let our_height = current_height.load(std::sync::atomic::Ordering::SeqCst) as u64;
+                            if peer_height > our_height && sync_session.is_none() {
+                                tracing::info!("Peer at height {peer_height}, we are at {our_height}. Starting block sync.");
+                                sync_session = Some(BlockSyncSession {
+                                    target_height: peer_height,
+                                    next_to_request: our_height + 1,
+                                });
+                                sync_waiting = false;
+                            }
+                        }
+                        NetworkMessage::BlockRequest(req_h) => {
+                            let resp = match storage.get_block_by_height(req_h) {
+                                Ok(Some((b, _))) => NetworkMessage::BlockResponse(Some(b)),
+                                _ => NetworkMessage::BlockResponse(None),
+                            };
+                            let _ = net_tx.send(resp).await;
                         }
                         _ => {}
                     }
