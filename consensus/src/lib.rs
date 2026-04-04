@@ -1,7 +1,11 @@
+#![deny(warnings)]
+
 use axiom_crypto::{compute_block_hash, sign_vote, PrivateKey};
 use axiom_execution::{apply_block_v2, execute_proposal_v2, ExecutionError};
-use axiom_primitives::{Block, BlockHash, ProtocolVersion, Transaction, ValidatorId, ValidatorSignature};
-use axiom_state::{State, StakingState};
+use axiom_primitives::{
+    Block, BlockHash, ProtocolVersion, Transaction, ValidatorId, ValidatorSignature,
+};
+use axiom_state::{StakingState, State};
 use thiserror::Error;
 
 pub mod bft;
@@ -32,7 +36,8 @@ pub fn validate_and_commit_block(
     parent_hash: &BlockHash,
     parent_height: u64,
 ) -> Result<(State, StakingState), ConsensusError> {
-    let (new_state, new_staking) = apply_block_v2(state, staking_state, block, parent_hash, parent_height)?;
+    let (new_state, new_staking) =
+        apply_block_v2(state, staking_state, block, parent_hash, parent_height)?;
     Ok((new_state, new_staking))
 }
 
@@ -105,7 +110,9 @@ mod tests {
     use super::*;
     use axiom_crypto::test_keypair;
     use axiom_execution::select_proposer;
-    use axiom_primitives::{AccountId, GenesisAccount, GenesisConfig, GenesisValidator, TransactionType};
+    use axiom_primitives::{
+        AccountId, GenesisAccount, GenesisConfig, GenesisValidator, TransactionType,
+    };
 
     fn create_genesis_state() -> (State, axiom_crypto::PrivateKey, ValidatorId, AccountId) {
         let (sk, pk) = test_keypair("val1");
@@ -154,8 +161,9 @@ mod tests {
         // We have 1 validator with 100 voting power. 1 signature.
         // 100 > 2/3 * 100 (66). So quorum should be met.
 
-        let (new_state, _new_staking) = validate_and_commit_block(&state, &staking, &block, &parent_hash, 0)
-            .expect("Failed to validate block");
+        let (new_state, _new_staking) =
+            validate_and_commit_block(&state, &staking, &block, &parent_hash, 0)
+                .expect("Failed to validate block");
 
         assert_eq!(new_state.block_reward, 10);
         assert_eq!(new_state.total_supply, 1010);
@@ -171,7 +179,15 @@ mod tests {
         let (wrong_sk, wrong_pk) = test_keypair("wrong");
         let wrong_id = ValidatorId(wrong_pk.0);
 
-        let res = construct_block(&state, &staking, 1, parent_hash, vec![], &wrong_sk, &wrong_id);
+        let res = construct_block(
+            &state,
+            &staking,
+            1,
+            parent_hash,
+            vec![],
+            &wrong_sk,
+            &wrong_id,
+        );
 
         assert!(matches!(
             res,
@@ -200,7 +216,15 @@ mod tests {
         let mut signed_tx = tx.clone();
         signed_tx.signature = axiom_crypto::sign_transaction(&sk, &tx);
 
-        let res = construct_block(&state, &staking, 1, parent_hash, vec![signed_tx], &sk, &val_id);
+        let res = construct_block(
+            &state,
+            &staking,
+            1,
+            parent_hash,
+            vec![signed_tx],
+            &sk,
+            &val_id,
+        );
 
         // Should fail with Execution error inside Consensus error
         match res {
@@ -343,7 +367,8 @@ mod tests {
             signature: sig3,
         });
 
-        validate_and_commit_block(&state, &staking, &block, &parent_hash, 0).expect("3/3 should pass");
+        validate_and_commit_block(&state, &staking, &block, &parent_hash, 0)
+            .expect("3/3 should pass");
     }
 
     #[test]
@@ -352,7 +377,8 @@ mod tests {
         let staking = StakingState::empty();
         let parent_hash = BlockHash([0u8; 32]);
 
-        let mut block = construct_block(&state, &staking, 1, parent_hash, vec![], &sk, &val_id).unwrap();
+        let mut block =
+            construct_block(&state, &staking, 1, parent_hash, vec![], &sk, &val_id).unwrap();
 
         // Add signature from unknown validator
         let (unknown_sk, unknown_pk) = test_keypair("unknown");
@@ -380,7 +406,8 @@ mod tests {
         let staking = StakingState::empty();
         let parent_hash = BlockHash([0u8; 32]);
 
-        let mut block = construct_block(&state, &staking, 1, parent_hash, vec![], &sk, &val_id).unwrap();
+        let mut block =
+            construct_block(&state, &staking, 1, parent_hash, vec![], &sk, &val_id).unwrap();
 
         // Duplicate the existing signature
         let sig = block.signatures[0].clone();

@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use axiom_crypto::compute_transaction_hash_for_height;
 use axiom_primitives::{Transaction, TransactionHash};
 use std::collections::{HashMap, VecDeque};
@@ -138,7 +140,10 @@ mod tests {
         let mut pool = Mempool::new(10);
         let tx = create_dummy_tx(0);
         pool.add_for_height(0, tx.clone()).unwrap();
-        assert!(matches!(pool.add_for_height(0, tx), Err(MempoolError::Duplicate)));
+        assert!(matches!(
+            pool.add_for_height(0, tx),
+            Err(MempoolError::Duplicate)
+        ));
     }
 
     #[test]

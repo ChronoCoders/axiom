@@ -8,6 +8,6 @@ axiom-primitives = { path = "../primitives" }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-bincode = "1.3"
+rmp-serde = "1"
 tracing = "0.1"
 futures = "0.3"

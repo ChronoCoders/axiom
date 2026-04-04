@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use axiom_crypto::{
     compute_block_hash, compute_genesis_hash, generate_keypair_from_seed, sha256, sign_vote,
 };
@@ -211,7 +213,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let bh2e_hex = to_hex(&block2_empty_hash.0);
     println!("Block 2 hash (empty): {bh2e_hex}");
 
-    println!("\n=== Transaction Vector 1: Transfer 100,000 from account-D to account-A (Block 2) ===\n");
+    println!(
+        "\n=== Transaction Vector 1: Transfer 100,000 from account-D to account-A (Block 2) ===\n"
+    );
 
     let sender_d_idx = 0;
     let recipient_a_idx = 1;
@@ -257,8 +261,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         &state_after_b1,
         std::slice::from_ref(&tx1_signed),
         &proposer_h2,
-    )
-    ?;
+    )?;
     let sh2_hex = to_hex(&state_hash_h2.0);
     println!("\nState hash after block 2 (with transfer): {sh2_hex}");
     println!("  STATE_HASH_BLOCK_2 = {sh2_hex}");
@@ -276,7 +279,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("  total_supply: {}", state_after_b2.total_supply);
 
-    println!("\n=== Transaction Vector 4: Transfer 50,000 from account-D to account-E (Block 3) ===\n");
+    println!(
+        "\n=== Transaction Vector 4: Transfer 50,000 from account-D to account-E (Block 3) ===\n"
+    );
 
     let account_e_seed = sha256(b"axiom-test-account-5");
     let (_, account_e_pk) = generate_keypair_from_seed(&account_e_seed);
@@ -332,8 +337,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         &state_after_b2,
         std::slice::from_ref(&tx2_signed),
         &proposer_h3,
-    )
-    ?;
+    )?;
     let sh3_hex = to_hex(&state_hash_h3.0);
     println!("\nState hash after block 3 (with auto-create transfer): {sh3_hex}");
     println!("  STATE_HASH_BLOCK_3 = {sh3_hex}");

@@ -1,6 +1,11 @@
+#![deny(warnings)]
+
 use axiom_crypto::compute_block_hash;
 use axiom_execution::{compute_state_hash, execute_proposal, select_proposer};
-use axiom_primitives::{Block, BlockHash, ProtocolVersion, StateHash, ValidatorId, PROTOCOL_VERSION_V1, V2_ACTIVATION_HEIGHT};
+use axiom_primitives::{
+    Block, BlockHash, ProtocolVersion, StateHash, ValidatorId, PROTOCOL_VERSION_V1,
+    V2_ACTIVATION_HEIGHT,
+};
 use axiom_state::State;
 use axiom_storage::Storage;
 use std::path::PathBuf;
@@ -94,4 +99,3 @@ fn main() {
         final_hash
     );
 }
-

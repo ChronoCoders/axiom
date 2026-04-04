@@ -1,6 +1,8 @@
+#![deny(warnings)]
+
 use axiom_primitives::{
-    AccountId, Block, BlockHash, Signature, StakeAmount, StateHash,
-    UnbondingEntry, ValidatorId, ValidatorSignature, MIN_VALIDATOR_STAKE, UNBONDING_PERIOD,
+    AccountId, Block, BlockHash, Signature, StakeAmount, StateHash, UnbondingEntry, ValidatorId,
+    ValidatorSignature, MIN_VALIDATOR_STAKE, UNBONDING_PERIOD,
 };
 use axiom_state::{Account, StakingState, State, Validator};
 use axiom_storage::Storage;
@@ -19,20 +21,38 @@ fn test_staking_state_storage_roundtrip() {
     let acc_id2 = AccountId([2u8; 32]);
 
     let mut accounts = BTreeMap::new();
-    accounts.insert(acc_id, Account { balance: 700_000, nonce: 1 });
-    accounts.insert(acc_id2, Account { balance: 100_000, nonce: 0 });
+    accounts.insert(
+        acc_id,
+        Account {
+            balance: 700_000,
+            nonce: 1,
+        },
+    );
+    accounts.insert(
+        acc_id2,
+        Account {
+            balance: 100_000,
+            nonce: 0,
+        },
+    );
 
     let mut validators = BTreeMap::new();
-    validators.insert(val_id, Validator {
-        voting_power: 100,
-        account_id: acc_id,
-        active: true,
-    });
-    validators.insert(val_id2, Validator {
-        voting_power: 50,
-        account_id: acc_id2,
-        active: true,
-    });
+    validators.insert(
+        val_id,
+        Validator {
+            voting_power: 100,
+            account_id: acc_id,
+            active: true,
+        },
+    );
+    validators.insert(
+        val_id2,
+        Validator {
+            voting_power: 50,
+            account_id: acc_id2,
+            active: true,
+        },
+    );
 
     let state = State {
         total_supply: 1_000_000,
@@ -76,7 +96,10 @@ fn test_staking_state_storage_roundtrip() {
         loaded_staking.stakes.get(&val_id).unwrap().0,
         staking.stakes.get(&val_id).unwrap().0,
     );
-    assert_eq!(loaded_staking.unbonding_queue.len(), staking.unbonding_queue.len());
+    assert_eq!(
+        loaded_staking.unbonding_queue.len(),
+        staking.unbonding_queue.len()
+    );
     assert_eq!(
         loaded_staking.unbonding_queue[0].validator_id,
         staking.unbonding_queue[0].validator_id,

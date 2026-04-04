@@ -1,1 +1,5 @@
 registries.crates-io.protocol = "sparse"
+
+[alias]
+# Matches CI: deny all Clippy lints (rustc warnings are already errors via #![deny(warnings)] on each crate root).
+clippy-strict = "clippy --workspace --all-targets --all-features -- -D warnings"

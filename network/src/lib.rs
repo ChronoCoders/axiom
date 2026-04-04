@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use axiom_primitives::Block;
 use axiom_primitives::BlockHash;
 use axiom_primitives::Evidence;
@@ -232,17 +234,19 @@ impl Network {
 
                     info!("Connected to peer {}", peer_addr);
 
-                    if let Err(e) =
-                        perform_handshake(
-                            &mut stream,
-                            local_protocol_version,
-                            local_height,
-                            local_genesis_hash,
-                            limits,
-                        )
-                        .await
+                    if let Err(e) = perform_handshake(
+                        &mut stream,
+                        local_protocol_version,
+                        local_height,
+                        local_genesis_hash,
+                        limits,
+                    )
+                    .await
                     {
-                        warn!("Handshake failed with {}: {}. Reconnecting...", peer_addr, e);
+                        warn!(
+                            "Handshake failed with {}: {}. Reconnecting...",
+                            peer_addr, e
+                        );
                         tokio::select! {
                             _ = tokio::time::sleep(retry_interval) => {},
                             _ = shutdown_rx_peer.recv() => return,
@@ -279,7 +283,7 @@ impl Network {
                                          if matches!(msg, NetworkMessage::StatusRequest | NetworkMessage::StatusResponse { .. }) {
                                             continue;
                                          }
-                                         let bytes = match bincode::serialize(&msg) {
+                                         let bytes = match rmp_serde::to_vec(&msg) {
                                             Ok(b) => b,
                                             Err(e) => {
                                                 error!("Serialization error: {}", e);
@@ -467,67 +471,65 @@ async fn handle_incoming_connection(
         stream.read_exact(&mut buf).await?;
 
         // 3. Deserialize
-        match bincode::deserialize::<NetworkMessage>(&buf) {
-            Ok(msg) => {
-                match msg {
-                    NetworkMessage::StatusRequest => {
-                        let resp = NetworkMessage::StatusResponse {
-                            protocol_version: local_protocol_version,
-                            height: local_height,
-                            genesis_hash: local_genesis_hash,
-                        };
-                        send_network_message(&mut stream, &resp, limits.max_message_bytes).await?;
+        match rmp_serde::from_slice::<NetworkMessage>(&buf) {
+            Ok(msg) => match msg {
+                NetworkMessage::StatusRequest => {
+                    let resp = NetworkMessage::StatusResponse {
+                        protocol_version: local_protocol_version,
+                        height: local_height,
+                        genesis_hash: local_genesis_hash,
+                    };
+                    send_network_message(&mut stream, &resp, limits.max_message_bytes).await?;
+                }
+                NetworkMessage::StatusResponse {
+                    protocol_version,
+                    genesis_hash,
+                    ..
+                } => {
+                    if protocol_version != local_protocol_version {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::PermissionDenied,
+                            "Peer protocol version mismatch",
+                        ));
                     }
-                    NetworkMessage::StatusResponse {
-                        protocol_version,
-                        genesis_hash,
-                        ..
-                    } => {
-                        if protocol_version != local_protocol_version {
-                            return Err(std::io::Error::new(
-                                std::io::ErrorKind::PermissionDenied,
-                                "Peer protocol version mismatch",
-                            ));
-                        }
-                        if genesis_hash != local_genesis_hash {
-                            return Err(std::io::Error::new(
-                                std::io::ErrorKind::PermissionDenied,
-                                "Peer genesis mismatch",
-                            ));
-                        }
-                        verified = true;
+                    if genesis_hash != local_genesis_hash {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::PermissionDenied,
+                            "Peer genesis mismatch",
+                        ));
                     }
-                    other => {
-                        if !verified {
-                            validate_message_payload_size(
-                                &other,
-                                limits.max_tx_bytes,
-                                limits.max_block_bytes,
-                                limits.max_evidence_bytes,
-                            )?;
-                            handshake_message_count = handshake_message_count.saturating_add(1);
-                            if handshake_message_count > limits.max_handshake_messages {
-                                return Err(std::io::Error::new(
-                                    std::io::ErrorKind::PermissionDenied,
-                                    "Too many messages before handshake completes",
-                                ));
-                            }
-                            debug!("Dropping message before handshake completes: {:?}", other);
-                            continue;
-                        }
+                    verified = true;
+                }
+                other => {
+                    if !verified {
                         validate_message_payload_size(
                             &other,
                             limits.max_tx_bytes,
                             limits.max_block_bytes,
                             limits.max_evidence_bytes,
                         )?;
-                        if let Err(e) = tx.send(other).await {
-                            error!("Failed to forward message to node: {}", e);
-                            return Ok(());
+                        handshake_message_count = handshake_message_count.saturating_add(1);
+                        if handshake_message_count > limits.max_handshake_messages {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::PermissionDenied,
+                                "Too many messages before handshake completes",
+                            ));
                         }
+                        debug!("Dropping message before handshake completes: {:?}", other);
+                        continue;
+                    }
+                    validate_message_payload_size(
+                        &other,
+                        limits.max_tx_bytes,
+                        limits.max_block_bytes,
+                        limits.max_evidence_bytes,
+                    )?;
+                    if let Err(e) = tx.send(other).await {
+                        error!("Failed to forward message to node: {}", e);
+                        return Ok(());
                     }
                 }
-            }
+            },
             Err(e) => {
                 error!("Failed to deserialize message: {}", e);
                 return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e));
@@ -559,7 +561,7 @@ async fn perform_handshake(
             remaining,
             read_network_message(stream, limits.max_message_bytes),
         )
-            .await??;
+        .await??;
         let elapsed = start.elapsed();
         remaining = remaining.saturating_sub(elapsed);
 
@@ -605,7 +607,7 @@ async fn send_network_message(
     msg: &NetworkMessage,
     max_message_bytes: usize,
 ) -> std::io::Result<()> {
-    let bytes = bincode::serialize(msg)
+    let bytes = rmp_serde::to_vec(msg)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     if bytes.len() > max_message_bytes {
         return Err(std::io::Error::new(
@@ -634,7 +636,7 @@ async fn read_network_message(
     }
     let mut buf = vec![0u8; len];
     stream.read_exact(&mut buf).await?;
-    bincode::deserialize::<NetworkMessage>(&buf)
+    rmp_serde::from_slice::<NetworkMessage>(&buf)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
@@ -646,9 +648,9 @@ fn validate_message_payload_size(
 ) -> std::io::Result<()> {
     match msg {
         NetworkMessage::TransactionGossip(tx) => {
-            let sz = bincode::serialized_size(tx)
+            let sz = rmp_serde::to_vec(tx)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
-                as usize;
+                .len();
             if sz > max_tx_bytes {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -657,9 +659,9 @@ fn validate_message_payload_size(
             }
         }
         NetworkMessage::BlockProposal(block) => {
-            let sz = bincode::serialized_size(block)
+            let sz = rmp_serde::to_vec(block)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
-                as usize;
+                .len();
             if sz > max_block_bytes {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -668,9 +670,9 @@ fn validate_message_payload_size(
             }
         }
         NetworkMessage::Proposal(p) => {
-            let sz = bincode::serialized_size(&p.block)
+            let sz = rmp_serde::to_vec(&p.block)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
-                as usize;
+                .len();
             if sz > max_block_bytes {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -679,9 +681,9 @@ fn validate_message_payload_size(
             }
         }
         NetworkMessage::Evidence(e) => {
-            let sz = bincode::serialized_size(e)
+            let sz = rmp_serde::to_vec(e)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
-                as usize;
+                .len();
             if sz > max_evidence_bytes {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,

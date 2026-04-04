@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -1200,7 +1202,10 @@ mod tests {
         assert_eq!(format!("{}", TransactionType::Transfer), "Transfer");
         assert_eq!(format!("{}", TransactionType::Stake), "Stake");
         assert_eq!(format!("{}", TransactionType::Unstake), "Unstake");
-        assert_eq!(format!("{}", TransactionType::SlashEvidence), "SlashEvidence");
+        assert_eq!(
+            format!("{}", TransactionType::SlashEvidence),
+            "SlashEvidence"
+        );
     }
 
     #[test]

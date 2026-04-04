@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use axiom_network::{Network, NetworkConfig, NetworkMessage};
 use axiom_primitives::{
     AccountId, Block, BlockHash, Evidence, Proposal, Signature, StateHash, Transaction,
@@ -104,8 +106,8 @@ async fn test_serialization_variants() {
     ];
 
     for msg in variants {
-        let encoded = bincode::serialize(&msg).unwrap();
-        let decoded: NetworkMessage = bincode::deserialize(&encoded).unwrap();
+        let encoded = rmp_serde::to_vec(&msg).unwrap();
+        let decoded: NetworkMessage = rmp_serde::from_slice(&encoded).unwrap();
         // Just checking it doesn't panic and is same variant
         match (msg, decoded) {
             (NetworkMessage::BlockProposal(_), NetworkMessage::BlockProposal(_)) => {}
@@ -121,8 +123,8 @@ async fn test_serialization_variants() {
     }
 }
 
-use tokio::sync::broadcast;
 use tokio::net::TcpStream;
+use tokio::sync::broadcast;
 
 #[tokio::test]
 async fn test_peer_unavailable() {
@@ -397,7 +399,7 @@ async fn test_rejects_oversized_transaction_gossip() {
     let len = u32::from_be_bytes(len_buf) as usize;
     let mut buf = vec![0u8; len];
     stream.read_exact(&mut buf).await.unwrap();
-    let inbound: NetworkMessage = bincode::deserialize(&buf).unwrap();
+    let inbound: NetworkMessage = rmp_serde::from_slice(&buf).unwrap();
     assert!(matches!(inbound, NetworkMessage::StatusRequest));
 
     let resp = NetworkMessage::StatusResponse {
@@ -405,13 +407,13 @@ async fn test_rejects_oversized_transaction_gossip() {
         height: 0,
         genesis_hash,
     };
-    let resp_bytes = bincode::serialize(&resp).unwrap();
+    let resp_bytes = rmp_serde::to_vec(&resp).unwrap();
     let resp_len = resp_bytes.len() as u32;
     stream.write_all(&resp_len.to_be_bytes()).await.unwrap();
     stream.write_all(&resp_bytes).await.unwrap();
 
     let msg = NetworkMessage::TransactionGossip(dummy_tx());
-    let bytes = bincode::serialize(&msg).unwrap();
+    let bytes = rmp_serde::to_vec(&msg).unwrap();
     let len = bytes.len() as u32;
     stream.write_all(&len.to_be_bytes()).await.unwrap();
     stream.write_all(&bytes).await.unwrap();

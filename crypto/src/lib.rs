@@ -1,9 +1,10 @@
+#![deny(warnings)]
+
 use axiom_primitives::{
-    serialize_block_canonical, serialize_string, serialize_transaction_canonical_v1,
-    serialize_transaction_canonical_v2, serialize_u64, serialize_vote_canonical,
-    serialize_proposal_canonical, to_hex, Block, BlockHash, GenesisConfig, ProtocolVersion,
-    Proposal, PublicKey, Signature, StateHash, Transaction, TransactionHash, ValidatorId, Vote,
-    VotePhase,
+    serialize_block_canonical, serialize_proposal_canonical, serialize_string,
+    serialize_transaction_canonical_v1, serialize_transaction_canonical_v2, serialize_u64,
+    serialize_vote_canonical, to_hex, Block, BlockHash, GenesisConfig, Proposal, ProtocolVersion,
+    PublicKey, Signature, StateHash, Transaction, TransactionHash, ValidatorId, Vote, VotePhase,
 };
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
@@ -127,7 +128,11 @@ pub fn sign_transaction_v2(private_key: &PrivateKey, tx: &Transaction) -> Signat
     Signature(sig.to_bytes())
 }
 
-pub fn sign_transaction_for_height(height: u64, private_key: &PrivateKey, tx: &Transaction) -> Signature {
+pub fn sign_transaction_for_height(
+    height: u64,
+    private_key: &PrivateKey,
+    tx: &Transaction,
+) -> Signature {
     match ProtocolVersion::for_height(height) {
         ProtocolVersion::V1 => sign_transaction(private_key, tx),
         ProtocolVersion::V2 => sign_transaction_v2(private_key, tx),
@@ -163,7 +168,10 @@ pub fn verify_transaction_signature_v2(tx: &Transaction) -> Result<(), CryptoErr
         .map_err(|_| CryptoError::InvalidSignature)
 }
 
-pub fn verify_transaction_signature_for_height(height: u64, tx: &Transaction) -> Result<(), CryptoError> {
+pub fn verify_transaction_signature_for_height(
+    height: u64,
+    tx: &Transaction,
+) -> Result<(), CryptoError> {
     match ProtocolVersion::for_height(height) {
         ProtocolVersion::V1 => verify_transaction_signature(tx),
         ProtocolVersion::V2 => verify_transaction_signature_v2(tx),

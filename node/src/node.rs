@@ -328,12 +328,19 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                 handle_clone.graceful_shutdown(Some(Duration::from_secs(5)));
             });
 
-            if let Err(e) = axum_server::from_tcp_rustls(listener, tls_config)
-                .handle(handle)
-                .serve(router.into_make_service())
-                .await
-            {
-                tracing::error!("API Server Error: {}", e);
+            match axum_server::from_tcp_rustls(listener, tls_config) {
+                Ok(server) => {
+                    if let Err(e) = server
+                        .handle(handle)
+                        .serve(router.into_make_service())
+                        .await
+                    {
+                        tracing::error!("API Server Error: {}", e);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to create TLS server: {}", e);
+                }
             }
         } else {
             let listener = match tokio::net::TcpListener::bind(api_addr).await {
@@ -632,12 +639,9 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                     }
 
                     if engine.step != BftStep::Proposal {
-                        if let Ok(Some(out)) = engine.make_prevote(
-                            &state_guard,
-                            &staking_guard,
-                            sk,
-                            val_id,
-                        ) {
+                        if let Ok(Some(out)) =
+                            engine.make_prevote(&state_guard, &staking_guard, sk, val_id)
+                        {
                             pending_outbound.push(out);
                         }
 
@@ -672,7 +676,9 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                 tracing::error!("Failed to persist consensus vote: {e}");
                                 continue;
                             }
-                            if let Err(e) = net_tx.send(NetworkMessage::ConsensusVote(v.clone())).await {
+                            if let Err(e) =
+                                net_tx.send(NetworkMessage::ConsensusVote(v.clone())).await
+                            {
                                 tracing::error!("Failed to broadcast consensus vote: {e}");
                                 continue;
                             }
@@ -695,7 +701,9 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                     let after_lock = engine.lock_state();
                                     if after_lock != before_lock {
                                         if let Err(e) = storage.save_lock_state(&after_lock) {
-                                            tracing::error!("Failed to persist updated lock state: {e}");
+                                            tracing::error!(
+                                                "Failed to persist updated lock state: {e}"
+                                            );
                                         }
                                     }
                                     additional.append(&mut outs);
@@ -704,16 +712,18 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                             }
                         }
                         BftOutbound::Evidence(evidence) => {
-                            if let Err(e) = net_tx.send(NetworkMessage::Evidence(evidence.clone())).await {
+                            if let Err(e) = net_tx
+                                .send(NetworkMessage::Evidence(evidence.clone()))
+                                .await
+                            {
                                 tracing::error!("Failed to broadcast evidence: {e}");
                             }
 
                             if let (Some(my_vid), Some(sk)) = (&my_validator_id, &my_private_key) {
                                 let maybe_tx: Option<Transaction> = (|| {
                                     let state_guard = state.lock().ok()?;
-                                    let sender_account = state_guard
-                                        .get_validator(my_vid)
-                                        .map(|v| v.account_id)?;
+                                    let sender_account =
+                                        state_guard.get_validator(my_vid).map(|v| v.account_id)?;
                                     let nonce = state_guard.get_account(&sender_account)?.nonce;
                                     let offender = match &evidence {
                                         Evidence::DoubleVote { vote_a, .. } => vote_a.validator_id,
@@ -735,15 +745,19 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                         tx_type: TransactionType::SlashEvidence,
                                         evidence: Some(evidence.clone()),
                                     };
-                                    tx.signature = sign_transaction_for_height(next_height, sk, &tx);
+                                    tx.signature =
+                                        sign_transaction_for_height(next_height, sk, &tx);
                                     Some(tx)
-                                })();
+                                })(
+                                );
 
                                 if let Some(tx) = maybe_tx {
                                     if let Ok(mut mempool_guard) = mempool.lock() {
-                                        let _ = mempool_guard.add_for_height(next_height, tx.clone());
+                                        let _ =
+                                            mempool_guard.add_for_height(next_height, tx.clone());
                                     }
-                                    let _ = net_tx.send(NetworkMessage::TransactionGossip(tx)).await;
+                                    let _ =
+                                        net_tx.send(NetworkMessage::TransactionGossip(tx)).await;
                                 }
                             }
                         }
@@ -807,7 +821,8 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                         mempool_guard.remove_batch(&tx_hashes);
                                     }
 
-                                    current_height.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                    current_height
+                                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                                     reset_bft = true;
                                 }
                                 Err(e) => {
@@ -822,16 +837,18 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                 for out in additional {
                     match out {
                         BftOutbound::Evidence(evidence) => {
-                            if let Err(e) = net_tx.send(NetworkMessage::Evidence(evidence.clone())).await {
+                            if let Err(e) = net_tx
+                                .send(NetworkMessage::Evidence(evidence.clone()))
+                                .await
+                            {
                                 tracing::error!("Failed to broadcast evidence: {e}");
                             }
 
                             if let (Some(my_vid), Some(sk)) = (&my_validator_id, &my_private_key) {
                                 let maybe_tx: Option<Transaction> = (|| {
                                     let state_guard = state.lock().ok()?;
-                                    let sender_account = state_guard
-                                        .get_validator(my_vid)
-                                        .map(|v| v.account_id)?;
+                                    let sender_account =
+                                        state_guard.get_validator(my_vid).map(|v| v.account_id)?;
                                     let nonce = state_guard.get_account(&sender_account)?.nonce;
                                     let offender = match &evidence {
                                         Evidence::DoubleVote { vote_a, .. } => vote_a.validator_id,
@@ -853,20 +870,25 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                         tx_type: TransactionType::SlashEvidence,
                                         evidence: Some(evidence.clone()),
                                     };
-                                    tx.signature = sign_transaction_for_height(next_height, sk, &tx);
+                                    tx.signature =
+                                        sign_transaction_for_height(next_height, sk, &tx);
                                     Some(tx)
-                                })();
+                                })(
+                                );
 
                                 if let Some(tx) = maybe_tx {
                                     if let Ok(mut mempool_guard) = mempool.lock() {
-                                        let _ = mempool_guard.add_for_height(next_height, tx.clone());
+                                        let _ =
+                                            mempool_guard.add_for_height(next_height, tx.clone());
                                     }
-                                    let _ = net_tx.send(NetworkMessage::TransactionGossip(tx)).await;
+                                    let _ =
+                                        net_tx.send(NetworkMessage::TransactionGossip(tx)).await;
                                 }
                             }
                         }
                         BftOutbound::CommittedBlock(block) => {
-                            if let Err(e) = net_tx.send(NetworkMessage::BlockProposal(block)).await {
+                            if let Err(e) = net_tx.send(NetworkMessage::BlockProposal(block)).await
+                            {
                                 tracing::error!("Failed to broadcast committed block: {e}");
                             }
                         }
@@ -1216,7 +1238,9 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                             // construct_block already adds our signature to block.signatures
                             if let Some(sig) = block.signatures.first() {
                                 let sig_str = hex::encode(sig.signature.0);
-                                if let Err(e) = storage.save_own_vote(next_height, &block_hash, &sig_str) {
+                                if let Err(e) =
+                                    storage.save_own_vote(next_height, &block_hash, &sig_str)
+                                {
                                     tracing::error!("Failed to save own vote: {}", e);
                                 }
 
@@ -1340,10 +1364,17 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                     "Block {} committed successfully.",
                                     final_block.height
                                 );
-                                let commit_res = match ProtocolVersion::for_height(final_block.height) {
-                                    ProtocolVersion::V1 => storage.commit_block(&final_block, &new_state),
-                                    ProtocolVersion::V2 => storage.commit_block_v2(&final_block, &new_state, &new_staking),
-                                };
+                                let commit_res =
+                                    match ProtocolVersion::for_height(final_block.height) {
+                                        ProtocolVersion::V1 => {
+                                            storage.commit_block(&final_block, &new_state)
+                                        }
+                                        ProtocolVersion::V2 => storage.commit_block_v2(
+                                            &final_block,
+                                            &new_state,
+                                            &new_staking,
+                                        ),
+                                    };
                                 match commit_res {
                                     Ok(_) => {
                                         // Update State
@@ -1380,7 +1411,9 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                             if loaded_height >= next_height {
                                                 tracing::warn!("Storage is ahead (Height: {}). Updating state.", loaded_height);
                                                 *state_guard = loaded_state;
-                                                if let Ok(loaded_staking) = storage.load_staking_state() {
+                                                if let Ok(loaded_staking) =
+                                                    storage.load_staking_state()
+                                                {
                                                     *staking_guard = loaded_staking;
                                                 }
                                                 current_height.store(

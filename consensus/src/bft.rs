@@ -1,6 +1,12 @@
-use axiom_crypto::{compute_block_hash, sign_consensus_vote, sign_proposal, verify_consensus_vote, verify_proposal, PrivateKey};
+use axiom_crypto::{
+    compute_block_hash, sign_consensus_vote, sign_proposal, verify_consensus_vote, verify_proposal,
+    PrivateKey,
+};
 use axiom_execution::{execute_proposal_v2, select_proposer_v2, ExecutionError};
-use axiom_primitives::{Block, BlockHash, Evidence, LockState, Proposal, ProtocolVersion, Transaction, ValidatorId, ValidatorSignature, Vote, VotePhase, V2_ACTIVATION_HEIGHT, V2_MIGRATION_STAKE_PER_VALIDATOR};
+use axiom_primitives::{
+    Block, BlockHash, Evidence, LockState, Proposal, ProtocolVersion, Transaction, ValidatorId,
+    ValidatorSignature, Vote, VotePhase, V2_ACTIVATION_HEIGHT, V2_MIGRATION_STAKE_PER_VALIDATOR,
+};
 use axiom_state::{StakingState, State};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -91,14 +97,13 @@ impl Engine {
             });
         }
 
-        let (_, _, state_hash) =
-            execute_proposal_v2(
-                input.state,
-                input.staking,
-                &input.transactions,
-                input.proposer_id,
-                self.height,
-            )?;
+        let (_, _, state_hash) = execute_proposal_v2(
+            input.state,
+            input.staking,
+            &input.transactions,
+            input.proposer_id,
+            self.height,
+        )?;
 
         let block = Block {
             parent_hash: input.parent_hash,
@@ -254,7 +259,10 @@ impl Engine {
             return Ok(None);
         }
 
-        if !self.own_votes_sent.insert((self.height, self.round, VotePhase::Prevote)) {
+        if !self
+            .own_votes_sent
+            .insert((self.height, self.round, VotePhase::Prevote))
+        {
             return Ok(None);
         }
 
@@ -297,11 +305,12 @@ impl Engine {
         }
 
         verify_consensus_vote(&vote).map_err(ExecutionError::CryptoError)?;
-        let validator = state
-            .get_validator(&vote.validator_id)
-            .ok_or(ExecutionError::UnknownValidator {
-                id: vote.validator_id,
-            })?;
+        let validator =
+            state
+                .get_validator(&vote.validator_id)
+                .ok_or(ExecutionError::UnknownValidator {
+                    id: vote.validator_id,
+                })?;
         if !validator.active {
             return Err(ExecutionError::InactiveValidator {
                 id: vote.validator_id,
@@ -460,7 +469,12 @@ impl Engine {
         signed
     }
 
-    fn effective_stake(&self, state: &State, staking: &StakingState, validator_id: &ValidatorId) -> u64 {
+    fn effective_stake(
+        &self,
+        state: &State,
+        staking: &StakingState,
+        validator_id: &ValidatorId,
+    ) -> u64 {
         if let Some(v) = state.get_validator(validator_id) {
             if !v.active {
                 return 0;

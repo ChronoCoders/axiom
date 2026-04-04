@@ -176,7 +176,9 @@ impl AppConfig {
             )));
         }
         if self.mempool.max_size == 0 {
-            return Err(ConfigError::Message("mempool.max_size must be > 0".to_string()));
+            return Err(ConfigError::Message(
+                "mempool.max_size must be > 0".to_string(),
+            ));
         }
         if self.mempool.max_tx_bytes == 0 {
             return Err(ConfigError::Message(
@@ -194,7 +196,9 @@ impl AppConfig {
             ));
         }
         if self.logging.level.is_empty() {
-            return Err(ConfigError::Message("logging.level cannot be empty".to_string()));
+            return Err(ConfigError::Message(
+                "logging.level cannot be empty".to_string(),
+            ));
         }
         if self.logging.format.to_lowercase() != "json" {
             return Err(ConfigError::Message(
@@ -202,7 +206,9 @@ impl AppConfig {
             ));
         }
         if self.api.enabled && self.console.user.is_empty() {
-            return Err(ConfigError::Message("console.user cannot be empty".to_string()));
+            return Err(ConfigError::Message(
+                "console.user cannot be empty".to_string(),
+            ));
         }
         if self.api.enabled && self.console.password.is_empty() {
             return Err(ConfigError::Message(

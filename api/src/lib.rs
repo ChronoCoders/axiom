@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use axiom_crypto::{compute_transaction_hash_for_height, verify_transaction_signature_for_height};
 use axiom_mempool::Mempool;
 use axiom_network::PeerMap;
@@ -21,6 +23,7 @@ use std::sync::{Arc, Mutex};
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tokio::sync::RwLock;
 use tower::buffer::BufferLayer;
 use tower::limit::RateLimitLayer;
 use tower::load_shed::LoadShedLayer;
@@ -28,7 +31,6 @@ use tower::timeout::TimeoutLayer;
 use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
-use tokio::sync::RwLock;
 
 /// Token TTL: 8 hours.
 const TOKEN_TTL: Duration = Duration::from_secs(8 * 60 * 60);
@@ -208,11 +210,16 @@ async fn status(
     let genesis_hash = state.storage.get_genesis_hash().map_err(storage_err)?;
 
     // Use the stored hash and timestamp from the latest block row (no recomputation).
-    let (latest_block_hash, latest_block_timestamp) =
-        match state.storage.get_blocks_range(height, 1).map_err(storage_err)?.into_iter().next() {
-            Some((block, hash)) => (hash, block.timestamp),
-            None => (String::new(), 0u64),
-        };
+    let (latest_block_hash, latest_block_timestamp) = match state
+        .storage
+        .get_blocks_range(height, 1)
+        .map_err(storage_err)?
+        .into_iter()
+        .next()
+    {
+        Some((block, hash)) => (hash, block.timestamp),
+        None => (String::new(), 0u64),
+    };
 
     let validators = state.storage.get_validators().map_err(storage_err)?;
 
@@ -252,16 +259,8 @@ async fn metrics(
     let genesis_hash = state.storage.get_genesis_hash().map_err(storage_err)?;
     let validators = state.storage.get_validators().map_err(storage_err)?;
 
-    let peer_count = state
-        .peers
-        .lock()
-        .map(|m| m.len())
-        .unwrap_or(0);
-    let mempool_size = state
-        .mempool
-        .lock()
-        .map(|m| m.size())
-        .unwrap_or(0);
+    let peer_count = state.peers.lock().map(|m| m.len()).unwrap_or(0);
+    let mempool_size = state.mempool.lock().map(|m| m.size()).unwrap_or(0);
 
     let next_height = height.saturating_add(1);
     let next_protocol_version = ProtocolVersion::for_height(next_height).as_u64();
@@ -321,7 +320,10 @@ async fn list_blocks(
     };
 
     // Single ranged query — no N sequential round-trips.
-    let rows = state.storage.get_blocks_range(end_height, limit).map_err(storage_err)?;
+    let rows = state
+        .storage
+        .get_blocks_range(end_height, limit)
+        .map_err(storage_err)?;
     let blocks = rows
         .into_iter()
         .map(|(block, hash)| BlockSummary {
@@ -351,7 +353,11 @@ async fn get_block_by_height(
     State(state): State<Arc<AppState>>,
     Path(height): Path<u64>,
 ) -> Result<Json<BlockDetail>, (StatusCode, Json<ApiError>)> {
-    match state.storage.get_block_by_height(height).map_err(storage_err)? {
+    match state
+        .storage
+        .get_block_by_height(height)
+        .map_err(storage_err)?
+    {
         Some((block, hash)) => Ok(Json(BlockDetail {
             summary: BlockSummary {
                 height: block.height,
@@ -395,7 +401,11 @@ async fn get_block_by_hash(
     arr.copy_from_slice(&bytes);
     let hash = BlockHash(arr);
 
-    match state.storage.get_block_by_hash(&hash).map_err(storage_err)? {
+    match state
+        .storage
+        .get_block_by_hash(&hash)
+        .map_err(storage_err)?
+    {
         Some((block, stored_hash)) => Ok(Json(BlockDetail {
             summary: BlockSummary {
                 height: block.height,
@@ -447,7 +457,10 @@ async fn get_account(
     arr.copy_from_slice(&bytes);
     let account_id = AccountId(arr);
 
-    let account = state.storage.get_account(&account_id).map_err(storage_err)?;
+    let account = state
+        .storage
+        .get_account(&account_id)
+        .map_err(storage_err)?;
 
     if let Some(account) = account {
         Ok(Json(AccountResponse {
@@ -803,7 +816,9 @@ async fn submit_transaction(
         ));
     }
 
-    if version == ProtocolVersion::V2 && (tx.tx_type == TransactionType::Stake || tx.tx_type == TransactionType::Unstake) {
+    if version == ProtocolVersion::V2
+        && (tx.tx_type == TransactionType::Stake || tx.tx_type == TransactionType::Unstake)
+    {
         let vid = ValidatorId(tx.sender.0);
         let validator = state.storage.get_validator(&vid).map_err(storage_err)?;
 
@@ -825,17 +840,14 @@ async fn submit_transaction(
         }
 
         if tx.tx_type == TransactionType::Unstake {
-            let staking = state.storage.load_staking_state().map_err(|e| {
-                storage_err(e)
-            })?;
+            let staking = state.storage.load_staking_state().map_err(storage_err)?;
 
-            let effective_stake = if next_height == axiom_primitives::V2_ACTIVATION_HEIGHT
-                && staking.is_empty()
-            {
-                axiom_primitives::V2_MIGRATION_STAKE_PER_VALIDATOR
-            } else {
-                staking.stakes.get(&vid).map(|a| a.0).unwrap_or(0)
-            };
+            let effective_stake =
+                if next_height == axiom_primitives::V2_ACTIVATION_HEIGHT && staking.is_empty() {
+                    axiom_primitives::V2_MIGRATION_STAKE_PER_VALIDATOR
+                } else {
+                    staking.stakes.get(&vid).map(|a| a.0).unwrap_or(0)
+                };
 
             if effective_stake < tx.amount {
                 return Err((

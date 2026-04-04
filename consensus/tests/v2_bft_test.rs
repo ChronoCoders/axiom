@@ -1,8 +1,10 @@
+#![deny(warnings)]
+
 use axiom_consensus::bft::{Engine, Outbound, ProposalInputs, Step};
 use axiom_crypto::{compute_block_hash, test_keypair, verify_precommit, PrivateKey};
 use axiom_primitives::{
-    AccountId, BlockHash, GenesisAccount, GenesisConfig, GenesisValidator, LockState, ProtocolVersion,
-    ValidatorId, VotePhase, V2_ACTIVATION_HEIGHT,
+    AccountId, BlockHash, GenesisAccount, GenesisConfig, GenesisValidator, LockState,
+    ProtocolVersion, ValidatorId, VotePhase, V2_ACTIVATION_HEIGHT,
 };
 use axiom_state::{StakingState, State};
 use std::collections::BTreeMap;
@@ -137,7 +139,9 @@ fn test_v2_bft_commit_flow_and_signatures() {
     let block_hash = compute_block_hash(&proposal.block);
 
     for (_, engine) in engines.iter_mut() {
-        let _ = engine.on_proposal(&state, &staking, proposal.clone()).unwrap();
+        let _ = engine
+            .on_proposal(&state, &staking, proposal.clone())
+            .unwrap();
         assert_eq!(engine.step, Step::Prevote);
     }
 

@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use axiom_crypto::compute_block_hash;
 use axiom_primitives::{AccountId, Block, BlockHash, StateHash, ValidatorId};
 use axiom_state::{Account, State, Validator};

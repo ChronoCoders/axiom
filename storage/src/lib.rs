@@ -1,7 +1,9 @@
+#![deny(warnings)]
+
 use axiom_crypto::compute_block_hash;
 use axiom_primitives::{
-    AccountId, Block, BlockHash, LockState, ProtocolVersion, StakeAmount, StateHash, UnbondingEntry,
-    ValidatorId, Vote, VotePhase,
+    AccountId, Block, BlockHash, LockState, ProtocolVersion, StakeAmount, StateHash,
+    UnbondingEntry, ValidatorId, Vote, VotePhase,
 };
 use axiom_state::{Account, StakingState, State, Validator};
 use rusqlite::{params, Connection};
@@ -227,9 +229,7 @@ impl Storage {
             .unwrap_or(1);
 
         if current_version < 2 {
-            let has_timestamp: bool = conn
-                .prepare("SELECT timestamp FROM blocks LIMIT 0")
-                .is_ok();
+            let has_timestamp: bool = conn.prepare("SELECT timestamp FROM blocks LIMIT 0").is_ok();
             if !has_timestamp {
                 conn.execute(
                     "ALTER TABLE blocks ADD COLUMN timestamp INTEGER NOT NULL DEFAULT 0",
@@ -378,8 +378,7 @@ impl Storage {
     /// Get block by height. Returns (Block, stored_hash_hex) or None.
     pub fn get_block_by_height(&self, height: u64) -> Result<Option<(Block, String)>> {
         let conn = self.conn.lock().map_err(|_| StorageError::LockPoisoned)?;
-        let mut stmt =
-            conn.prepare("SELECT block_data, hash FROM blocks WHERE height = ?1")?;
+        let mut stmt = conn.prepare("SELECT block_data, hash FROM blocks WHERE height = ?1")?;
         let mut rows = stmt.query(params![height])?;
 
         if let Some(row) = rows.next()? {
@@ -395,8 +394,7 @@ impl Storage {
     /// Get block by hash. Returns (Block, stored_hash_hex) or None.
     pub fn get_block_by_hash(&self, hash: &BlockHash) -> Result<Option<(Block, String)>> {
         let conn = self.conn.lock().map_err(|_| StorageError::LockPoisoned)?;
-        let mut stmt =
-            conn.prepare("SELECT block_data, hash FROM blocks WHERE hash = ?1")?;
+        let mut stmt = conn.prepare("SELECT block_data, hash FROM blocks WHERE hash = ?1")?;
         let mut rows = stmt.query(params![hash.to_string()])?;
 
         if let Some(row) = rows.next()? {
@@ -834,12 +832,14 @@ impl Storage {
         let conn = self.conn.lock().map_err(|_| StorageError::LockPoisoned)?;
 
         let mut stakes = BTreeMap::new();
-        let mut stmt = conn.prepare("SELECT validator_id, amount FROM stakes ORDER BY validator_id")?;
+        let mut stmt =
+            conn.prepare("SELECT validator_id, amount FROM stakes ORDER BY validator_id")?;
         let mut rows = stmt.query([])?;
         while let Some(row) = rows.next()? {
             let vid_str: String = row.get(0)?;
-            let vid_bytes = hex::decode(&vid_str)
-                .map_err(|e| StorageError::Corruption(format!("Invalid validator id in stakes: {e}")))?;
+            let vid_bytes = hex::decode(&vid_str).map_err(|e| {
+                StorageError::Corruption(format!("Invalid validator id in stakes: {e}"))
+            })?;
             if vid_bytes.len() != 32 {
                 return Err(StorageError::Corruption(
                     "Invalid validator id length in stakes".to_string(),
@@ -888,7 +888,9 @@ impl Storage {
         while let Some(row) = rows.next()? {
             let h_str: String = row.get(0)?;
             let bytes = hex::decode(&h_str).map_err(|e| {
-                StorageError::Corruption(format!("Invalid evidence hash in processed_evidence: {e}"))
+                StorageError::Corruption(format!(
+                    "Invalid evidence hash in processed_evidence: {e}"
+                ))
             })?;
             if bytes.len() != 32 {
                 return Err(StorageError::Corruption(
@@ -907,8 +909,9 @@ impl Storage {
         let mut rows = stmt.query([])?;
         while let Some(row) = rows.next()? {
             let vid_str: String = row.get(0)?;
-            let vid_bytes = hex::decode(&vid_str)
-                .map_err(|e| StorageError::Corruption(format!("Invalid validator id in unbonding: {e}")))?;
+            let vid_bytes = hex::decode(&vid_str).map_err(|e| {
+                StorageError::Corruption(format!("Invalid validator id in unbonding: {e}"))
+            })?;
             if vid_bytes.len() != 32 {
                 return Err(StorageError::Corruption(
                     "Invalid validator id length in unbonding".to_string(),
@@ -1084,7 +1087,9 @@ impl Storage {
                 let block_hash = match block_hash_str {
                     Some(s) => {
                         let bytes = hex::decode(&s).map_err(|e| {
-                            StorageError::Corruption(format!("Invalid block hash in consensus_locks: {e}"))
+                            StorageError::Corruption(format!(
+                                "Invalid block hash in consensus_locks: {e}"
+                            ))
                         })?;
                         if bytes.len() != 32 {
                             return Err(StorageError::Corruption(

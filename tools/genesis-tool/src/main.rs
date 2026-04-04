@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use axiom_crypto::compute_genesis_hash;
 use axiom_primitives::{AccountId, GenesisAccount, GenesisConfig, GenesisValidator, ValidatorId};
 use clap::Parser;

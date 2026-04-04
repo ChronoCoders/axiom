@@ -1,13 +1,20 @@
-use axiom_crypto::{compute_block_hash, sign_consensus_vote, sign_transaction_for_height, test_keypair};
+#![deny(warnings)]
+
+use axiom_crypto::{
+    compute_block_hash, sign_consensus_vote, sign_transaction_for_height, test_keypair,
+};
 use axiom_execution::{execute_proposal_v2, select_proposer_v2};
 use axiom_primitives::{
-    AccountId, Block, BlockHash, Evidence, ProtocolVersion, Signature, Transaction, TransactionType,
-    ValidatorId, Vote, VotePhase, V2_ACTIVATION_HEIGHT,
+    AccountId, Block, BlockHash, Evidence, ProtocolVersion, Signature, Transaction,
+    TransactionType, ValidatorId, Vote, VotePhase, V2_ACTIVATION_HEIGHT,
 };
 use axiom_state::{StakingState, State};
 
 fn load_reference_genesis_state() -> State {
-    let genesis = axiom_primitives::deserialize_genesis_json(include_str!("../../fixtures/reference_genesis.json")).unwrap();
+    let genesis = axiom_primitives::deserialize_genesis_json(include_str!(
+        "../../fixtures/reference_genesis.json"
+    ))
+    .unwrap();
     State::from_genesis(&genesis).unwrap()
 }
 
@@ -265,4 +272,3 @@ fn test_v2_locked_vectors() {
 
     let _ = (state_3, staking_3);
 }
-

@@ -1,7 +1,9 @@
+#![deny(warnings)]
+
 use axiom_crypto::test_keypair;
 use axiom_node::config::{
-    ApiConfig, AppConfig, ConsoleConfig, GenesisConfig, LoggingConfig, MempoolConfig, NetworkConfig,
-    NodeConfig, StorageConfig,
+    ApiConfig, AppConfig, ConsoleConfig, GenesisConfig, LoggingConfig, MempoolConfig,
+    NetworkConfig, NodeConfig, StorageConfig,
 };
 use axiom_node::node;
 use std::fs;

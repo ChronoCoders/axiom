@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use axiom_api::{app_router, AppState};
 use axiom_mempool::Mempool;
 use axiom_primitives::StateHash;

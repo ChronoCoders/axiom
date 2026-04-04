@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use axiom_crypto::{compute_block_hash, sign_transaction, sign_vote, test_keypair, PrivateKey};
 use axiom_execution::{apply_block, compute_state_hash, execute_proposal};
 use axiom_primitives::{

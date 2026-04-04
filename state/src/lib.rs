@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use axiom_primitives::{
     serialize_string, serialize_u64, to_hex, AccountId, GenesisConfig, StakeAmount, UnbondingEntry,
     ValidatorId, MIN_VALIDATOR_STAKE, UNBONDING_PERIOD,
@@ -133,9 +135,7 @@ impl StakingState {
         amount: StakeAmount,
     ) -> Result<(), StateError> {
         let existing = self.stakes.get(&validator_id).map(|a| a.0).unwrap_or(0);
-        let new_amount = existing
-            .checked_add(amount.0)
-            .ok_or(StateError::Overflow)?;
+        let new_amount = existing.checked_add(amount.0).ok_or(StateError::Overflow)?;
         self.stakes.insert(validator_id, StakeAmount(new_amount));
         Ok(())
     }
@@ -163,10 +163,7 @@ impl StakingState {
             });
         }
 
-        let remaining = staked
-            .0
-            .checked_sub(amount)
-            .ok_or(StateError::Overflow)?;
+        let remaining = staked.0.checked_sub(amount).ok_or(StateError::Overflow)?;
 
         if remaining == 0 {
             self.stakes.remove(&validator_id);
@@ -210,10 +207,9 @@ impl StakingState {
 
     /// Returns the total amount currently staked across all validators.
     pub fn total_staked(&self) -> Result<u64, StateError> {
-        self.stakes
-            .values()
-            .map(|s| s.0)
-            .try_fold(0u64, |acc, x| acc.checked_add(x).ok_or(StateError::Overflow))
+        self.stakes.values().map(|s| s.0).try_fold(0u64, |acc, x| {
+            acc.checked_add(x).ok_or(StateError::Overflow)
+        })
     }
 
     /// Returns the total amount currently in the unbonding queue.
@@ -221,21 +217,22 @@ impl StakingState {
         self.unbonding_queue
             .iter()
             .map(|e| e.amount.0)
-            .try_fold(0u64, |acc, x| acc.checked_add(x).ok_or(StateError::Overflow))
+            .try_fold(0u64, |acc, x| {
+                acc.checked_add(x).ok_or(StateError::Overflow)
+            })
     }
 }
 
 /// Verifies that the combined economic invariants hold for v2 state.
 /// total_supply == sum(balances) + sum(staked) + sum(unbonding)
-pub fn verify_staking_invariants(
-    state: &State,
-    staking: &StakingState,
-) -> Result<(), StateError> {
+pub fn verify_staking_invariants(state: &State, staking: &StakingState) -> Result<(), StateError> {
     let balance_sum: u64 = state
         .accounts
         .values()
         .map(|a| a.balance)
-        .try_fold(0u64, |acc, x| acc.checked_add(x).ok_or(StateError::Overflow))?;
+        .try_fold(0u64, |acc, x| {
+            acc.checked_add(x).ok_or(StateError::Overflow)
+        })?;
 
     let staked_sum = staking.total_staked()?;
     let unbonding_sum = staking.total_unbonding()?;
@@ -874,8 +871,7 @@ mod tests {
     #[test]
     fn test_staking_state_not_empty_with_stake() {
         let mut ss = StakingState::empty();
-        ss.stakes
-            .insert(mock_validator_id(1), StakeAmount(100_000));
+        ss.stakes.insert(mock_validator_id(1), StakeAmount(100_000));
         assert!(!ss.is_empty());
     }
 
@@ -1037,13 +1033,22 @@ mod tests {
         let acc_id = mock_account_id(1);
         let val_id = mock_validator_id(1);
         let mut accounts = BTreeMap::new();
-        accounts.insert(acc_id, Account { balance: 700_000, nonce: 0 });
+        accounts.insert(
+            acc_id,
+            Account {
+                balance: 700_000,
+                nonce: 0,
+            },
+        );
         let mut validators = BTreeMap::new();
-        validators.insert(val_id, Validator {
-            voting_power: 10,
-            account_id: acc_id,
-            active: true,
-        });
+        validators.insert(
+            val_id,
+            Validator {
+                voting_power: 10,
+                account_id: acc_id,
+                active: true,
+            },
+        );
         let state = State {
             total_supply: 1_000_000,
             block_reward: 10,
@@ -1065,13 +1070,22 @@ mod tests {
         let acc_id = mock_account_id(1);
         let val_id = mock_validator_id(1);
         let mut accounts = BTreeMap::new();
-        accounts.insert(acc_id, Account { balance: 700_000, nonce: 0 });
+        accounts.insert(
+            acc_id,
+            Account {
+                balance: 700_000,
+                nonce: 0,
+            },
+        );
         let mut validators = BTreeMap::new();
-        validators.insert(val_id, Validator {
-            voting_power: 10,
-            account_id: acc_id,
-            active: true,
-        });
+        validators.insert(
+            val_id,
+            Validator {
+                voting_power: 10,
+                account_id: acc_id,
+                active: true,
+            },
+        );
         let state = State {
             total_supply: 999_999,
             block_reward: 10,

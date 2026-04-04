@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use axiom_execution::compute_state_hash;
 use axiom_primitives::PROTOCOL_VERSION;
 use tokio::signal;
@@ -70,11 +72,17 @@ async fn main() {
     };
 
     if config.logging.format.to_lowercase() != "json" {
-        eprintln!("Invalid logging.format: {} (must be 'json')", config.logging.format);
+        eprintln!(
+            "Invalid logging.format: {} (must be 'json')",
+            config.logging.format
+        );
         std::process::exit(1);
     }
 
-    let subscriber = FmtSubscriber::builder().with_max_level(level).json().finish();
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(level)
+        .json()
+        .finish();
     if tracing::subscriber::set_global_default(subscriber).is_err() {
         eprintln!("Failed to set global default subscriber");
         std::process::exit(1);
