@@ -22,7 +22,6 @@ use tokio::sync::RwLock;
 use crate::config::AppConfig;
 use crate::genesis::load_genesis_state;
 
-// NODE VERSION
 const NODE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::Receiver<()>) {
@@ -31,13 +30,11 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
     tracing::info!("Protocol Version: {}", PROTOCOL_VERSION);
     tracing::info!("Data Directory: {:?}", config.node.data_dir);
 
-    // Ensure data directory exists
     if let Err(e) = std::fs::create_dir_all(&config.node.data_dir) {
         tracing::error!("Failed to create data directory: {}", e);
         return;
     }
 
-    // 3. Initialize Storage & State
     let storage = match Storage::initialize(&config.storage.sqlite_path) {
         Ok(s) => Arc::new(s),
         Err(e) => {
@@ -46,7 +43,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
         }
     };
 
-    // Load latest state from DB or create genesis
     let latest_state = match storage.load_latest_state() {
         Ok(s) => s,
         Err(e) => {
@@ -78,13 +74,11 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
             // NOTE: Genesis hash check is done in main.rs (binary entry point).
             // Library consumers (tests) bypass strict checking or handle it themselves.
 
-            // Store genesis state and hash (Meta)
             if let Err(e) = storage.store_genesis(&genesis_state, &hash) {
                 tracing::error!("Failed to store genesis state: {e}");
                 return;
             }
 
-            // Commit genesis block to storage (Height 0)
             let genesis_block = Block {
                 parent_hash: BlockHash([0; 32]),
                 height: 0,
@@ -123,7 +117,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
     let staking_state = Arc::new(Mutex::new(staking));
     let current_height = Arc::new(AtomicUsize::new(height as usize));
 
-    // 4. Initialize Mempool
     let mempool_capacity = match usize::try_from(config.mempool.max_size) {
         Ok(v) if v > 0 => v,
         _ => {
@@ -144,7 +137,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
 
     let mempool = Arc::new(Mutex::new(Mempool::new(mempool_capacity)));
 
-    // 5. Initialize Network
     let bind_addr = match config.network.listen_address.parse() {
         Ok(addr) => addr,
         Err(e) => {
@@ -212,10 +204,8 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
     let (net_tx, mut net_rx, peer_map) =
         Network::start(net_config, shutdown_rx.resubscribe()).await;
 
-    // Create a broadcast channel for internal shutdown signals (e.g. from API)
     let mut shutdown_rx_api = shutdown_rx.resubscribe();
 
-    // 6. Initialize API
     let app_state = Arc::new(AppState {
         storage: storage.clone(),
         mempool: mempool.clone(),
@@ -279,7 +269,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                 }
             };
 
-            // Check if files exist
             if !cert_path.exists() || !key_path.exists() {
                 tracing::error!(
                     "TLS cert/key not found. Cert: {:?}, Key: {:?}",
@@ -320,7 +309,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
 
             let handle = axum_server::Handle::new();
 
-            // Spawn a task to listen for shutdown and trigger handle
             let handle_clone = handle.clone();
             tokio::spawn(async move {
                 let _ = shutdown_rx_api.recv().await;
@@ -372,9 +360,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
         }
     });
 
-    // 7. Consensus Loop
-
-    // Load Validator Key: check config (programmatic/test use) first, then env var (CODING_RULES 5.3)
+    // Load Validator Key: check config (programmatic/test use) first, then env var.
     let validator_key_hex = config
         .validator
         .private_key
@@ -411,8 +397,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
 
     tracing::info!("Starting Consensus Loop...");
 
-    // State for Consensus
-    // We keep track of votes for each block hash at each height
     let mut vote_pool: HashMap<(u64, BlockHash), Vec<ValidatorSignature>> = HashMap::new();
     // Pending block: We have validated it, but we are waiting for quorum.
     let mut pending_block: Option<Block> = None;
@@ -451,7 +435,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                             signature,
                                         };
 
-                                        // 1. Inject into vote_pool
                                         vote_pool
                                             .entry((next_height, block_hash))
                                             .or_default()
@@ -461,7 +444,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                         tracing::info!("Waiting for network stabilization before broadcasting vote...");
                                         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-                                        // 2. Broadcast exactly once
                                         let vote_msg = NetworkMessage::Vote(
                                             sig_struct,
                                             block_hash,
@@ -494,7 +476,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
     let mut bft_engine: Option<BftEngine> = None;
     let mut bft_step_started_at: Option<std::time::Instant> = None;
 
-    // Block sync state
     struct BlockSyncSession {
         target_height: u64,
         next_to_request: u64,
@@ -520,11 +501,15 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
         // When we detect a peer is ahead (via StatusResponse), we enter a
         // dedicated catch-up loop that bypasses BFT entirely until caught up.
         if sync_session.is_some() {
-            // Send the next block request if we are not already waiting for one.
             if !sync_waiting {
-                let req_h = sync_session.as_ref().unwrap().next_to_request;
+                let Some(session) = sync_session.as_ref() else { continue; };
+                let req_h = session.next_to_request;
                 tracing::info!("Sync: requesting block {}", req_h);
-                if net_tx.send(NetworkMessage::BlockRequest(req_h)).await.is_err() {
+                if net_tx
+                    .send(NetworkMessage::BlockRequest(req_h))
+                    .await
+                    .is_err()
+                {
                     sync_session = None;
                 } else {
                     sync_waiting = true;
@@ -622,8 +607,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
         let height = current_height.load(std::sync::atomic::Ordering::SeqCst) as u64;
         let next_height = height + 1;
 
-        // REMOVED: In-loop pending block loading (moved to initialization)
-
         tracing::info!(
             height = height,
             attempt = proposal_attempt,
@@ -631,7 +614,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
             "Consensus Loop Start"
         );
 
-        // Reset timeout tracking when height advances
         if height != last_height_seen {
             proposal_attempt = 0;
             last_proposal_time = std::time::Instant::now();
@@ -701,7 +683,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                     if bft_step_started_at.is_none() {
                         bft_step_started_at = Some(std::time::Instant::now());
                     }
-                    let started_at = bft_step_started_at.unwrap();
+                    let Some(started_at) = bft_step_started_at else { continue; };
                     let step_elapsed = started_at.elapsed();
 
                     let base = Duration::from_millis(800);
@@ -1261,9 +1243,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
             continue;
         }
 
-        // ---------------------------------------------------------------------
-        // 1. Proposer Logic
-        // ---------------------------------------------------------------------
         if pending_block.is_none() {
             let elapsed = last_proposal_time.elapsed();
             let is_timeout = elapsed > proposal_timeout;
@@ -1279,7 +1258,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                     }
                 };
                 if proposal_attempt == 0 {
-                    // Primary proposer check
                     match select_proposer(&state_guard, next_height) {
                         Ok(proposer) => should_propose = proposer == *val_id,
                         Err(e) => {
@@ -1287,7 +1265,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                         }
                     }
                 } else {
-                    // Fallback proposer check
                     match select_fallback_proposer(&state_guard, next_height, proposal_attempt) {
                         Ok(fallback) => should_propose = fallback == *val_id,
                         Err(e) => {
@@ -1303,7 +1280,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                         proposal_attempt
                     );
 
-                    // Get parent block
                     let parent_block = match storage.get_block_by_height(height) {
                         Ok(Some((b, _))) => b,
                         Ok(None) => {
@@ -1317,7 +1293,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                     };
                     let parent_hash = compute_block_hash(&parent_block);
 
-                    // Get txs from mempool
                     let mempool_guard = match mempool.lock() {
                         Ok(g) => g,
                         Err(e) => {
@@ -1328,8 +1303,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                     let txs = mempool_guard.get_batch(1000); // MAX_TX
                     drop(mempool_guard);
 
-                    // Construct
-                    // REMOVED: let state_guard = state.lock().unwrap(); // Avoid deadlock, reuse outer guard
                     let staking_guard = match staking_state.lock() {
                         Ok(g) => g,
                         Err(e) => {
@@ -1359,7 +1332,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                 tracing::error!("Failed to save pending block: {}", e);
                             }
 
-                            // Broadcast Proposal
                             let net_tx_clone = net_tx.clone();
                             let block_clone = block.clone();
                             tokio::spawn(async move {
@@ -1371,7 +1343,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                 }
                             });
 
-                            // Broadcast our Vote
                             // construct_block already adds our signature to block.signatures
                             if let Some(sig) = block.signatures.first() {
                                 let sig_str = hex::encode(sig.signature.0);
@@ -1390,14 +1361,12 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                     }
                                 });
 
-                                // Add our vote to pool
                                 let votes = vote_pool.entry((next_height, block_hash)).or_default();
                                 if !votes.iter().any(|v| v.validator_id == sig.validator_id) {
                                     votes.push(sig.clone());
                                 }
                             }
 
-                            // Store as pending
                             pending_block = Some(block);
                             pending_block_since = Some(std::time::Instant::now());
                         }
@@ -1418,15 +1387,11 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
             }
         }
 
-        // ---------------------------------------------------------------------
-        // 2. Check Quorum & Commit
-        // ---------------------------------------------------------------------
         let mut committed = false;
         if let Some(block) = &pending_block {
             if block.height == next_height {
                 let block_hash = compute_block_hash(block);
                 if let Some(votes) = vote_pool.get(&(next_height, block_hash)) {
-                    // Calculate voting power
                     let mut state_guard = match state.lock() {
                         Ok(g) => g,
                         Err(e) => {
@@ -1463,11 +1428,9 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                             total_power
                         );
 
-                        // Aggregate signatures into block
                         let mut final_block = block.clone();
                         final_block.signatures = votes.clone();
 
-                        // Get parent hash again
                         let parent_block = match storage.get_block_by_height(height) {
                             Ok(Some((b, _))) => b,
                             Ok(None) => {
@@ -1481,7 +1444,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                         };
                         let parent_hash = compute_block_hash(&parent_block);
 
-                        // Commit
                         let mut staking_guard = match staking_state.lock() {
                             Ok(g) => g,
                             Err(e) => {
@@ -1514,11 +1476,9 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                     };
                                 match commit_res {
                                     Ok(_) => {
-                                        // Update State
                                         *state_guard = new_state;
                                         *staking_guard = new_staking;
 
-                                        // Update Mempool
                                         let mut mempool_guard = match mempool.lock() {
                                             Ok(g) => g,
                                             Err(e) => {
@@ -1625,23 +1585,18 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
         }
 
         if committed {
-            // Mark pending blocks inactive (Durability Req 4)
             if let Err(e) = storage.mark_pending_blocks_inactive(next_height) {
                 tracing::error!("Failed to mark committed blocks inactive: {}", e);
             }
             pending_block = None;
             pending_block_since = None;
             current_height.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            // Clean up old votes
             vote_pool.retain(|(h, _), _| *h >= next_height);
             // Brief yield to allow shutdown checks and prevent tight loops
             tokio::time::sleep(Duration::from_millis(10)).await;
             continue; // Skip wait, go to next height
         }
 
-        // ---------------------------------------------------------------------
-        // 3. Handle Messages
-        // ---------------------------------------------------------------------
         tokio::select! {
             _ = shutdown_rx.recv() => {
                 tracing::info!("Consensus loop shutting down...");
@@ -1656,7 +1611,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                 tracing::debug!("Ignoring old block");
                                 continue;
                             }
-                            // Future Block Handling (Durability Req 5)
                             if block.height > next_height {
                                 tracing::warn!("Future block received (Height {}). Buffering.", block.height);
                                 if let Err(e) = storage.save_pending_block(&block) {
@@ -1688,7 +1642,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                     for sig in &block.signatures {
                                         if unique_validators.insert(sig.validator_id) {
                                             let public_key = PublicKey(sig.validator_id.0);
-                                            // Verify signature and validator existence/activity
                                             if verify_vote(&public_key, &block_hash, block.height, &sig.signature).is_ok() {
                                                 if let Some(val) = sg.get_validator(&sig.validator_id) {
                                                     if val.active {
@@ -1707,7 +1660,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                         "Replacing stale pending block with committed block at height {}",
                                         block.height
                                     );
-                                    // Clear old vote_pool entries for this height
                                     vote_pool.retain(|&(h, _), _| h != block.height);
                                     pending_block = None;
                                     pending_block_since = None;
@@ -1744,7 +1696,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                 }
                             }
 
-                            // Persist block before voting (Durability Req 1)
+                            // Persist block before voting to ensure durability before broadcasting vote.
                             if let Err(e) = storage.save_pending_block(&block) {
                                 tracing::error!("Failed to persist pending block: {}. Cannot vote.", e);
                                 continue;
@@ -1753,7 +1705,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                             if let (Some(val_id), Some(sk)) = (&my_validator_id, &my_private_key) {
                                 let block_hash = compute_block_hash(&block);
 
-                                // Check for existing vote (Durability Req 2)
+                                // Check for existing vote to prevent double-signing.
                                 let mut signature: Option<Signature> = None;
                                 let mut reuse_vote = false;
 
@@ -1761,7 +1713,6 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                     Ok(Some((stored_hash, stored_sig_str))) => {
                                         if stored_hash == block_hash {
                                             tracing::info!("Reusing existing vote for block {}", block_hash);
-                                            // Parse stored_sig_str back to Signature
                                             if let Ok(bytes) = hex::decode(&stored_sig_str) {
                                                 if bytes.len() == 64 {
                                                     let mut arr = [0u8; 64];
@@ -1791,7 +1742,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                     let sig = sign_vote(sk, &block_hash, block.height);
                                     let sig_str = hex::encode(sig.0);
 
-                                    // Persist vote (Durability Req 2)
+                                    // Persist vote before broadcasting to ensure it survives a restart.
                                     if let Err(e) = storage.save_own_vote(block.height, &block_hash, &sig_str) {
                                         tracing::error!("Failed to persist vote: {}. Cannot broadcast.", e);
                                         continue;
@@ -1835,14 +1786,12 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                 continue;
                             }
 
-                            // Verify Signature
                             let public_key = PublicKey(sig.validator_id.0);
                             if let Err(e) = verify_vote(&public_key, &block_hash, vote_height, &sig.signature) {
                                 tracing::warn!("Invalid vote signature: {}", e);
                                 continue;
                             }
 
-                            // Add to pool
                             let votes = vote_pool.entry((vote_height, block_hash)).or_default();
                             if !votes.iter().any(|v| v.validator_id == sig.validator_id) {
                                 votes.push(sig);
@@ -1870,9 +1819,8 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                     }
                 }
             }
-            _ = tokio::time::sleep(Duration::from_millis(100)) => {
-                // Periodic tick
-            }
+            _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+
         }
     }
 
