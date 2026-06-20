@@ -387,7 +387,6 @@ impl Engine {
                     Some((None, _)) => {
                         self.round = self.round.saturating_add(1);
                         self.step = Step::Proposal;
-                        // Prune vote maps for rounds more than 1 behind current.
                         let cur = self.round;
                         self.prevotes.retain(|r, _| *r + 1 >= cur);
                         self.precommits.retain(|r, _| *r + 1 >= cur);

@@ -8,10 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
-// -----------------------------------------------------------------------------
-// Types
-// -----------------------------------------------------------------------------
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
     pub total_supply: u64,
@@ -32,10 +28,6 @@ pub struct Validator {
     pub account_id: AccountId,
     pub active: bool,
 }
-
-// -----------------------------------------------------------------------------
-// v2 Staking State (scaffolding only — inert during v1)
-// -----------------------------------------------------------------------------
 
 /// Staking state for Protocol v2. This structure exists alongside the core State
 /// but is NOT included in v1 state hash computation or any v1 execution path.
@@ -253,10 +245,6 @@ pub fn verify_staking_invariants(state: &State, staking: &StakingState) -> Resul
     Ok(())
 }
 
-// -----------------------------------------------------------------------------
-// Errors
-// -----------------------------------------------------------------------------
-
 #[derive(Debug, Error)]
 pub enum StateError {
     #[error("Balance mismatch: expected supply {expected_supply}, actual sum {actual_sum}")]
@@ -290,10 +278,6 @@ pub enum StateError {
     InsufficientStake { requested: u64, available: u64 },
 }
 
-// -----------------------------------------------------------------------------
-// Implementation
-// -----------------------------------------------------------------------------
-
 impl State {
     /// Creates a new State from a GenesisConfig
     pub fn from_genesis(genesis: &GenesisConfig) -> Result<Self, StateError> {
@@ -301,7 +285,6 @@ impl State {
         let mut validators = BTreeMap::new();
         let mut actual_supply: u64 = 0;
 
-        // Process accounts
         for gen_acc in &genesis.accounts {
             if accounts.contains_key(&gen_acc.id) {
                 return Err(StateError::DuplicateAccount { id: gen_acc.id });
@@ -319,7 +302,6 @@ impl State {
                 .ok_or(StateError::Overflow)?;
         }
 
-        // Verify total supply matches sum of balances
         if actual_supply != genesis.total_supply {
             return Err(StateError::GenesisSupplyMismatch {
                 declared: genesis.total_supply,
@@ -327,13 +309,11 @@ impl State {
             });
         }
 
-        // Process validators
         for gen_val in &genesis.validators {
             if validators.contains_key(&gen_val.id) {
                 return Err(StateError::DuplicateValidator { id: gen_val.id });
             }
 
-            // Verify validator's account exists
             if !accounts.contains_key(&gen_val.account_id) {
                 return Err(StateError::ValidatorAccountMissing {
                     validator_id: gen_val.id,
@@ -363,8 +343,6 @@ impl State {
         Ok(state)
     }
 
-    // Queries
-
     pub fn get_account(&self, id: &AccountId) -> Option<&Account> {
         self.accounts.get(id)
     }
@@ -387,8 +365,6 @@ impl State {
                 acc.checked_add(x).ok_or(StateError::Overflow)
             })
     }
-
-    // Mutation methods for Phase 4
 
     pub fn get_account_mut(&mut self, id: &AccountId) -> Option<&mut Account> {
         self.accounts.get_mut(id)
@@ -420,14 +396,11 @@ impl State {
         Ok(())
     }
 
-    // Serialization
-
     pub fn serialize_state_canonical(&self) -> Vec<u8> {
         let mut buf = Vec::new();
         serialize_u64(self.total_supply, &mut buf);
         serialize_u64(self.block_reward, &mut buf);
 
-        // Accounts
         let accounts_len = self.accounts.len() as u32;
         buf.extend_from_slice(&accounts_len.to_be_bytes());
         for (id, acc) in &self.accounts {
@@ -436,7 +409,6 @@ impl State {
             serialize_u64(acc.nonce, &mut buf);
         }
 
-        // Validators
         let validators_len = self.validators.len() as u32;
         buf.extend_from_slice(&validators_len.to_be_bytes());
         for (id, val) in &self.validators {
@@ -448,8 +420,6 @@ impl State {
 
         buf
     }
-
-    // Validation
 
     pub fn verify_invariants(&self) -> Result<(), StateError> {
         let mut sum: u64 = 0;
@@ -464,7 +434,6 @@ impl State {
             });
         }
 
-        // Ensure all validators point to existing accounts
         for (vid, val) in &self.validators {
             if !self.accounts.contains_key(&val.account_id) {
                 return Err(StateError::ValidatorAccountMissing {

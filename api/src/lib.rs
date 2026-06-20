@@ -69,7 +69,6 @@ async fn handle_error(error: BoxError) -> (StatusCode, String) {
     }
 }
 
-// API Error Response
 #[derive(Serialize)]
 pub struct ApiError {
     pub error: String,
@@ -85,13 +84,11 @@ impl ApiError {
     }
 }
 
-// Health Checks
 async fn health_live() -> StatusCode {
     StatusCode::OK
 }
 
 async fn health_ready(State(state): State<Arc<AppState>>) -> StatusCode {
-    // Check if storage is accessible and genesis is loaded
     match state.storage.get_genesis_hash() {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::SERVICE_UNAVAILABLE,
@@ -138,7 +135,6 @@ async fn auth_login(
         ));
     }
 
-    // Generate a cryptographically random token (32 bytes from OsRng).
     let mut raw = [0u8; 32];
     rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut raw);
     let token = hex::encode(raw);
@@ -187,7 +183,6 @@ fn storage_err(e: impl std::fmt::Display) -> (StatusCode, Json<ApiError>) {
     )
 }
 
-// Status
 #[derive(Serialize)]
 struct StatusResponse {
     protocol_version: u64,
@@ -287,7 +282,6 @@ async fn metrics(
     ))
 }
 
-// Blocks
 #[derive(Deserialize)]
 struct ListBlocksParams {
     limit: Option<usize>,
@@ -427,7 +421,6 @@ async fn get_block_by_hash(
     }
 }
 
-// Accounts
 #[derive(Serialize)]
 struct AccountResponse {
     account_id: String,
@@ -476,7 +469,6 @@ async fn get_account(
     }
 }
 
-// Validators
 #[derive(Serialize)]
 struct ValidatorResponse {
     validator_id: String,
@@ -702,7 +694,6 @@ fn is_leap(y: u64) -> bool {
     (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
 }
 
-// Transactions
 #[derive(Serialize)]
 struct SubmitTransactionResponse {
     tx_hash: String,
@@ -745,7 +736,6 @@ async fn submit_transaction(
         ));
     }
 
-    // 1. Verify Signature
     if verify_transaction_signature_for_height(next_height, &tx).is_err() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -753,7 +743,6 @@ async fn submit_transaction(
         ));
     }
 
-    // 2. Amount / Evidence sanity
     if tx.tx_type != TransactionType::SlashEvidence && tx.amount == 0 {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -781,10 +770,8 @@ async fn submit_transaction(
         }
     }
 
-    // 3. Sender Exists and Balance/Nonce Check
-    // We need current state to check balance/nonce
-    // In a real high-throughput system we might check this against mempool + state,
-    // but for V1 checking against committed state is safer/simpler (conservative).
+    // Checking against committed state is conservative; a high-throughput system would
+    // check mempool + state, but that complexity isn't warranted for V1.
     let sender_account = state.storage.get_account(&tx.sender).map_err(storage_err)?;
 
     if let Some(account) = sender_account {
@@ -861,7 +848,6 @@ async fn submit_transaction(
         }
     }
 
-    // 4. Add to Mempool
     let mut mempool = state.mempool.lock().map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -904,7 +890,6 @@ pub fn app_router(state: Arc<AppState>, web_dir: PathBuf) -> Router {
         .saturating_add(4096)
         .min(1_048_576);
 
-    // API Routes (Hardening: Rate Limits, Timeouts, Tracing)
     let api_routes = Router::new()
         .route("/status", get(status))
         .route("/metrics", get(metrics))

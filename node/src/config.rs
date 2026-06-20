@@ -238,13 +238,11 @@ pub struct CliArgs {
     #[arg(long, default_value = "axiom.toml")]
     pub config: PathBuf,
 
-    // Node overrides
     #[arg(long)]
     pub node_id: Option<String>,
     #[arg(long)]
     pub data_dir: Option<PathBuf>,
 
-    // Network overrides
     #[arg(long)]
     pub network_enabled: Option<bool>,
     #[arg(long)]
@@ -252,7 +250,6 @@ pub struct CliArgs {
     #[arg(long, value_delimiter = ',')]
     pub network_peers: Option<Vec<String>>,
 
-    // API overrides
     #[arg(long)]
     pub api_enabled: Option<bool>,
     #[arg(long)]
@@ -264,15 +261,12 @@ pub struct CliArgs {
     #[arg(long)]
     pub api_tls_key: Option<PathBuf>,
 
-    // Storage overrides
     #[arg(long)]
     pub storage_sqlite_path: Option<PathBuf>,
 
-    // Genesis overrides
     #[arg(long)]
     pub genesis_file: Option<PathBuf>,
 
-    // Logging overrides
     #[arg(long)]
     pub logging_level: Option<String>,
     #[arg(long)]
@@ -285,7 +279,6 @@ pub struct CliArgs {
     pub console_user: Option<String>,
     // console_password is intentionally omitted from CLI args to prevent exposure
     // in process listings. Set it via the config file or AXIOM__CONSOLE__PASSWORD env var.
-    // Validator private key loaded from AXIOM_VALIDATOR_PRIVATE_KEY env var (CODING_RULES 5.3)
 }
 
 impl AppConfig {
@@ -358,7 +351,6 @@ impl AppConfig {
             builder = builder.set_override("logging.level", v)?;
         }
 
-        // Validator private key is read from AXIOM_VALIDATOR_PRIVATE_KEY env var only (CODING_RULES 5.3)
         if let Some(v) = args.logging_format {
             builder = builder.set_override("logging.format", v)?;
         }
