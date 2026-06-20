@@ -10,7 +10,6 @@ use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-// Error type for crypto operations
 #[derive(Debug, Error)]
 pub enum CryptoError {
     #[error("Invalid signature")]
@@ -23,15 +22,7 @@ pub enum CryptoError {
     HashMismatch { expected: String, got: String },
 }
 
-// Re-export PrivateKey as ed25519_dalek::SigningKey for convenience,
-// or wrap it if we want strict typing. The guide uses "PrivateKey".
-// ed25519-dalek 2.x uses SigningKey / VerifyingKey.
-// Let's define aliases or wrappers.
 pub type PrivateKey = SigningKey;
-// PublicKey is already defined in primitives as a wrapper around [u8; 32].
-// We need to convert between primitives::PublicKey and ed25519_dalek::VerifyingKey.
-
-// Hashing
 
 /// Computes SHA-256 hash of data
 pub fn sha256(data: &[u8]) -> [u8; 32] {
@@ -112,12 +103,9 @@ pub fn compute_genesis_hash(genesis: &GenesisConfig) -> StateHash {
     StateHash(sha256(&buf))
 }
 
-// Signing
-
 /// Signs a transaction
 pub fn sign_transaction(private_key: &PrivateKey, tx: &Transaction) -> Signature {
     let bytes = serialize_transaction_canonical_v1(tx);
-    // ed25519-dalek returns a Signature struct, we need [u8; 64]
     let sig = private_key.sign(&bytes);
     Signature(sig.to_bytes())
 }
@@ -304,8 +292,6 @@ pub fn ct_compare(a: &[u8], b: &[u8]) -> bool {
     let hb = sha256(b);
     ha.ct_eq(&hb).into()
 }
-
-// Key handling helpers
 
 pub fn generate_keypair_from_seed(seed: &[u8; 32]) -> (PrivateKey, PublicKey) {
     let signing_key = SigningKey::from_bytes(seed);

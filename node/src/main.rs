@@ -10,11 +10,9 @@ use axiom_node::config::AppConfig;
 use axiom_node::genesis::load_genesis_state;
 use axiom_node::node;
 
-// LOCKED GENESIS HASH
 const LOCKED_GENESIS_HASH: &str =
     "c1b50f23e410fe99b7ec6e304165b18f1dfe723ad5417133a12cdf8517460761";
 
-// Helper for shutdown signal
 async fn shutdown_signal() {
     let ctrl_c = async {
         if let Err(e) = signal::ctrl_c().await {
@@ -44,7 +42,6 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() {
-    // 1. Load Configuration
     let config = match AppConfig::load() {
         Ok(c) => c,
         Err(e) => {
@@ -58,7 +55,6 @@ async fn main() {
         std::process::exit(1);
     }
 
-    // 2. Initialize Logging
     let level = match config.logging.level.to_lowercase().as_str() {
         "error" => LevelFilter::ERROR,
         "warn" => LevelFilter::WARN,
@@ -91,13 +87,11 @@ async fn main() {
     tracing::info!("Starting AXIOM Node (Binary): {}", config.node.node_id);
     tracing::info!("Protocol Version: {}", PROTOCOL_VERSION);
 
-    // GENESIS HASH CHECK
     match load_genesis_state(&config.genesis.genesis_file) {
         Ok(genesis_state) => {
             let hash = compute_state_hash(&genesis_state);
             tracing::info!("Verifying Genesis Hash: {}", hex::encode(hash.0));
 
-            // Verify strict genesis hash
             if hash.0.as_slice()
                 != hex::decode(LOCKED_GENESIS_HASH)
                     .unwrap_or_default()
@@ -115,10 +109,8 @@ async fn main() {
         }
     }
 
-    // Shutdown Signal Channel
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
 
-    // Spawn signal handler
     let shutdown_tx_clone = shutdown_tx.clone();
     tokio::spawn(async move {
         shutdown_signal().await;
@@ -126,6 +118,5 @@ async fn main() {
         let _ = shutdown_tx_clone.send(());
     });
 
-    // Start Node
     node::start(config, shutdown_rx).await;
 }

@@ -8,7 +8,6 @@ pub fn load_genesis_state(path: &Path) -> Result<State, Box<dyn std::error::Erro
     let content = fs::read_to_string(path)?;
     let dto: GenesisConfig = serde_json::from_str(&content)?;
 
-    // Validate Total Supply
     let calculated_supply: u64 = dto
         .accounts
         .iter()
@@ -22,7 +21,6 @@ pub fn load_genesis_state(path: &Path) -> Result<State, Box<dyn std::error::Erro
         .into());
     }
 
-    // Convert to State
     let mut accounts = BTreeMap::new();
 
     for acc in dto.accounts {
@@ -37,7 +35,6 @@ pub fn load_genesis_state(path: &Path) -> Result<State, Box<dyn std::error::Erro
 
     let mut validators = BTreeMap::new();
     for v in dto.validators {
-        // Validate validator account exists
         if !accounts.contains_key(&v.account_id) {
             return Err(format!(
                 "Validator {} associated account {} does not exist",

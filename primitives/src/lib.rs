@@ -5,12 +5,10 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use subtle::ConstantTimeEq;
 
-// Protocol version supported by this node implementation (network identity).
 pub const PROTOCOL_VERSION: u64 = 2;
 pub const MAX_TRANSACTIONS_PER_BLOCK: usize = 1000;
 pub const MAX_BLOCK_SIZE_BYTES: usize = 1_048_576; // 1 MB
 
-// Protocol v2 constants (compile-time, deterministic, integer-only)
 pub const PROTOCOL_V1_VERSION: u64 = 1;
 pub const PROTOCOL_V2_VERSION: u64 = 2;
 pub const PROTOCOL_VERSION_V1: u64 = PROTOCOL_V1_VERSION;
@@ -142,8 +140,6 @@ pub enum VotePhase {
 
 pub type VoteType = VotePhase;
 
-// Core identifiers
-
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AccountId(pub [u8; 32]); // Ed25519 public key
 
@@ -232,7 +228,6 @@ impl Hash for PublicKey {
     }
 }
 
-// Display implementation for hex encoding
 impl fmt::Display for AccountId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", to_hex(&self.0))
@@ -310,14 +305,12 @@ impl fmt::Debug for PublicKey {
     }
 }
 
-// Implement conversion from ValidatorId to PublicKey
 impl ValidatorId {
     pub fn as_public_key(&self) -> PublicKey {
         PublicKey(self.0)
     }
 }
 
-// Implement Serde for core identifiers (as hex strings)
 impl Serialize for AccountId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -495,7 +488,6 @@ impl<'de> Deserialize<'de> for PublicKey {
     }
 }
 
-// Block structure
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Block {
     pub parent_hash: BlockHash,
@@ -525,7 +517,6 @@ pub struct ValidatorSignature {
     pub signature: Signature,
 }
 
-// Transaction structure
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transaction {
     pub sender: AccountId,
@@ -570,8 +561,7 @@ pub enum Evidence {
     },
 }
 
-// Genesis structure (for JSON deserialization)
-// Note: Fields are ordered alphabetically to ensure deterministic JSON if serialized by field order.
+// Note: GenesisConfig fields are ordered alphabetically to ensure deterministic JSON if serialized by field order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GenesisConfig {
     pub accounts: Vec<GenesisAccount>,
@@ -595,7 +585,6 @@ pub struct GenesisValidator {
     pub voting_power: u64,
 }
 
-// Error type for primitives
 #[derive(Debug)]
 pub enum PrimitivesError {
     InvalidHex,
@@ -610,8 +599,6 @@ impl fmt::Display for PrimitivesError {
         }
     }
 }
-
-// Serialization Functions
 
 pub fn to_hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);

@@ -93,7 +93,7 @@ pub enum NetworkMessage {
         height: u64,
         genesis_hash: StateHash,
     },
-    BlockRequest(u64),           // request block at this height
+    BlockRequest(u64),            // request block at this height
     BlockResponse(Option<Block>), // response: Some(block) or None if not found
 }
 
@@ -156,17 +156,12 @@ impl Network {
         mpsc::Receiver<NetworkMessage>,
         PeerMap,
     ) {
-        // Channel for Node to send messages to Network (to be broadcasted)
         let (net_tx, mut net_rx) = mpsc::channel::<NetworkMessage>(1000);
-
-        // Channel for Network to send messages to Node (received from peers)
         let (node_tx, node_rx) = mpsc::channel::<NetworkMessage>(1000);
 
-        // Broadcast channel to distribute messages to all peer tasks
         // We use a broadcast channel so we can fan-out the single message from net_rx to all peers
         let (bcast_tx, _) = broadcast::channel::<NetworkMessage>(1000);
 
-        // 1. Outgoing Message Distributor (Fan-out)
         let bcast_tx_clone = bcast_tx.clone();
         let mut shutdown_rx_dist = shutdown_rx.resubscribe();
         tokio::spawn(async move {
@@ -190,8 +185,6 @@ impl Network {
         let retry_interval = config.retry_interval.unwrap_or(Duration::from_secs(5));
         let peer_map: PeerMap = Arc::new(Mutex::new(HashMap::new()));
 
-        // 2. Peer Connection Tasks (Persistent Outgoing)
-        // For each peer in the config, we start a dedicated task that maintains a connection
         let limits = ConnectionLimits {
             max_message_bytes: config.max_message_bytes,
             max_tx_bytes: config.max_tx_bytes,
@@ -215,7 +208,6 @@ impl Network {
             tokio::spawn(async move {
                 info!("Starting connection manager for peer {}", peer_addr);
                 loop {
-                    // Try to connect
                     let connect_fut = TcpStream::connect(peer_addr);
 
                     let mut stream = tokio::select! {
@@ -340,7 +332,6 @@ impl Network {
             });
         }
 
-        // 3. Listener Task (Incoming Connections)
         let bind_addr = config.bind_addr;
         let node_tx_clone = node_tx.clone();
         let mut shutdown_rx_listener = shutdown_rx.resubscribe();
@@ -452,7 +443,6 @@ async fn handle_incoming_connection(
             ));
         }
 
-        // 1. Read Length (4 bytes)
         let mut len_buf = [0u8; 4];
         match stream.read_exact(&mut len_buf).await {
             Ok(_) => {}
@@ -468,11 +458,9 @@ async fn handle_incoming_connection(
             ));
         }
 
-        // 2. Read Payload
         let mut buf = vec![0u8; len];
         stream.read_exact(&mut buf).await?;
 
-        // 3. Deserialize
         match rmp_serde::from_slice::<NetworkMessage>(&buf) {
             Ok(msg) => match msg {
                 NetworkMessage::StatusRequest => {

@@ -15,10 +15,6 @@ use axiom_state::{verify_staking_invariants, Account, StakingState, State, State
 use std::collections::HashSet;
 use thiserror::Error;
 
-// -----------------------------------------------------------------------------
-// Errors
-// -----------------------------------------------------------------------------
-
 #[derive(Debug, Error)]
 pub enum ExecutionError {
     #[error("Invalid height: expected {expected}, got {got}")]
@@ -139,10 +135,6 @@ pub enum ExecutionError {
     StateError(#[from] StateError),
 }
 
-// -----------------------------------------------------------------------------
-// Core Logic
-// -----------------------------------------------------------------------------
-
 /// Computes the state hash (SHA-256 of canonical binary serialization)
 pub fn compute_state_hash(state: &State) -> StateHash {
     let bytes = state.serialize_state_canonical();
@@ -250,7 +242,6 @@ pub fn apply_block(
     // 6. Validate quorum
     verify_quorum(previous_state, block)?;
 
-    // Clone state for atomic application
     let mut new_state = previous_state.clone();
 
     // 7. Process transactions
@@ -286,10 +277,6 @@ pub fn apply_block(
 
     Ok(new_state)
 }
-
-// -----------------------------------------------------------------------------
-// v2 Execution (Staking)
-// -----------------------------------------------------------------------------
 
 /// Applies a block with protocol version awareness.
 /// For v1 blocks (height < activation): delegates to apply_block (v1 rules).
@@ -905,10 +892,6 @@ fn apply_slash_evidence_transaction(
     let _ = current_height;
     Ok(())
 }
-
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
 
 fn active_validator_set(state: &State) -> HashSet<ValidatorId> {
     state
