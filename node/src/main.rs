@@ -94,7 +94,7 @@ async fn main() {
 
             if hash.0.as_slice()
                 != hex::decode(LOCKED_GENESIS_HASH)
-                    .unwrap_or_default()
+                    .expect("LOCKED_GENESIS_HASH is invalid hex")
                     .as_slice()
             {
                 tracing::error!("CRITICAL: Genesis hash mismatch!");
