@@ -36,7 +36,9 @@ function logout() {
 /* ---- Utilities ---- */
 
 function fetchJSON(path) {
-  return fetch(API_BASE + path).then(function (res) {
+  var token = sessionStorage.getItem("axiom_token");
+  var headers = token ? { "Authorization": "Bearer " + token } : {};
+  return fetch(API_BASE + path, { headers: headers }).then(function (res) {
     if (!res.ok) {
       var err = new Error(res.status === 404 ? "Not found" : "Request failed (" + res.status + ")");
       err.status = res.status;
