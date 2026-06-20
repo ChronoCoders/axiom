@@ -106,7 +106,7 @@ impl Storage {
             [],
         )?;
 
-        // Table: pending_blocks (Durability Requirement 1 & 5)
+        // Table: pending_blocks
         conn.execute(
             "CREATE TABLE IF NOT EXISTS pending_blocks (
                 height INTEGER NOT NULL,
@@ -117,7 +117,7 @@ impl Storage {
             [],
         )?;
 
-        // Table: self_votes (Durability Requirement 2)
+        // Table: self_votes
         // height is PRIMARY KEY to enforce single vote per height at DB level
         conn.execute(
             "CREATE TABLE IF NOT EXISTS self_votes (
@@ -250,7 +250,6 @@ impl Storage {
         let mut conn = self.conn.lock().map_err(|_| StorageError::LockPoisoned)?;
         let tx = conn.transaction()?;
 
-        // Store accounts
         for (id, account) in &state.accounts {
             tx.execute(
                 "INSERT OR REPLACE INTO accounts (account_id, balance, nonce) VALUES (?1, ?2, ?3)",
@@ -258,7 +257,6 @@ impl Storage {
             )?;
         }
 
-        // Store validators
         for (id, validator) in &state.validators {
             tx.execute(
                 "INSERT OR REPLACE INTO validators (validator_id, voting_power, account_id, active) VALUES (?1, ?2, ?3, ?4)",
@@ -266,7 +264,6 @@ impl Storage {
             )?;
         }
 
-        // Store meta
         tx.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES ('genesis_hash', ?1)",
             params![genesis_hash.to_string()],
@@ -282,7 +279,6 @@ impl Storage {
             params![state.block_reward.to_string()],
         )?;
 
-        // Initial height is 0 (before first block)
         tx.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES ('latest_height', '0')",
             [],
@@ -297,7 +293,6 @@ impl Storage {
         let mut conn = self.conn.lock().map_err(|_| StorageError::LockPoisoned)?;
         let tx = conn.transaction()?;
 
-        // 1. Store Block
         let block_hash = compute_block_hash(block);
         let block_data = serde_json::to_vec(block)?;
 
@@ -316,11 +311,7 @@ impl Storage {
             ],
         )?;
 
-        // 2. Update Accounts (Upsert all for simplicity/correctness with minimal logic)
-        // In a real optimized system, we'd only update modified accounts.
-        // Here we just iterate the state map.
-        // First, clear existing? No, that's too slow. Upsert is better.
-        // But what if an account is removed? (Not possible in V1, no delete).
+        // Upsert all accounts; account deletion isn't possible in V1.
         for (id, account) in &state.accounts {
             tx.execute(
                 "INSERT OR REPLACE INTO accounts (account_id, balance, nonce) VALUES (?1, ?2, ?3)",
@@ -328,7 +319,6 @@ impl Storage {
             )?;
         }
 
-        // 3. Update Validators
         for (id, validator) in &state.validators {
             tx.execute(
                 "INSERT OR REPLACE INTO validators (validator_id, voting_power, account_id, active) VALUES (?1, ?2, ?3, ?4)",
@@ -336,7 +326,6 @@ impl Storage {
             )?;
         }
 
-        // 4. Update Meta
         tx.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES ('latest_height', ?1)",
             params![block.height],
@@ -447,9 +436,6 @@ impl Storage {
         let mut validators = Vec::new();
         while let Some(row) = rows.next()? {
             let vid_str: String = row.get(0)?;
-            // Need to parse hex string to ValidatorId
-            // Assuming we have a helper or can do it manually.
-            // ValidatorId is [u8; 32]
             let vid_bytes = hex::decode(&vid_str)
                 .map_err(|e| StorageError::Corruption(format!("Invalid validator id: {e}")))?;
             if vid_bytes.len() != 32 {
@@ -548,8 +534,6 @@ impl Storage {
     /// Load the latest state from the database
     pub fn load_latest_state(&self) -> Result<Option<(State, u64)>> {
         let height = self.get_latest_height()?;
-        // If height is 0, we might still have genesis state.
-        // Check if genesis_hash exists in meta.
         let conn = self.conn.lock().map_err(|_| StorageError::LockPoisoned)?;
 
         let mut stmt = conn.prepare("SELECT value FROM meta WHERE key = 'genesis_hash'")?;
@@ -557,7 +541,6 @@ impl Storage {
             return Ok(None);
         }
 
-        // Read Meta
         let mut stmt = conn.prepare("SELECT value FROM meta WHERE key = 'total_supply'")?;
         let total_supply: u64 = stmt.query_row([], |row| {
             let s: String = row.get(0)?;
@@ -570,7 +553,6 @@ impl Storage {
             Ok(s.parse().unwrap_or(0))
         })?;
 
-        // Read Accounts
         let mut accounts = BTreeMap::new();
         let mut stmt = conn.prepare("SELECT account_id, balance, nonce FROM accounts")?;
         let mut rows = stmt.query([])?;
@@ -591,7 +573,6 @@ impl Storage {
             );
         }
 
-        // Read Validators
         let mut validators = BTreeMap::new();
         let mut stmt =
             conn.prepare("SELECT validator_id, voting_power, account_id, active FROM validators")?;
@@ -666,10 +647,8 @@ impl Storage {
     }
 
     /// Mark pending blocks as inactive up to a certain height
-    /// Durability Requirement 4: Safe Cleanup
     pub fn mark_pending_blocks_inactive(&self, height: u64) -> Result<()> {
         let conn = self.conn.lock().map_err(|_| StorageError::LockPoisoned)?;
-        // Mark blocks at this height or lower as inactive
         conn.execute(
             "UPDATE pending_blocks SET is_active = 0 WHERE height <= ?1",
             params![height],
