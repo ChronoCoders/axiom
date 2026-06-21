@@ -355,7 +355,7 @@ function initOverview() {
     setHeight(s.height);
     setText("ovValidators", fmt(s.validator_count));
     setText("ovSyncing",   s.syncing ? "Yes" : "No");
-    var _proto = s.protocol_version;
+    var _proto = s.next_protocol_version;
     setText("ovProtocol", _proto === 1 ? "Transfer" : _proto === 2 ? "Staking" : _proto != null ? "v" + _proto : "-");
 
     setPulse(true);
