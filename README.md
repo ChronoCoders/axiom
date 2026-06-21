@@ -11,10 +11,10 @@ AXIOM is not a public cryptocurrency. The validator set is fixed and known; bloc
 - **Consensus** — Round-based BFT (PBFT-style) with prevote/precommit phases. Supermajority threshold: `votes * 3 > total_power * 2`.
 - **Finality** — Instant. A committed block is final; no forks, no reorgs.
 - **Validator set** — Fixed and configured at genesis. Rotation requires a protocol upgrade.
-- **Transaction types** — Transfer (V1+), Stake, Unstake, SlashEvidence (V2+).
+- **Transaction types** — Transfer (Transfer protocol+), Stake, Unstake, SlashEvidence (Staking protocol+).
 - **Protocol versioning** — Derived from block height at runtime. No stored version state.
-  - `height < 10,000` → V1 (Transfer only)
-  - `height ≥ 10,000` → V2 (staking, slashing, epochs)
+  - `height < 10,000` → Transfer (Transfer only)
+  - `height ≥ 10,000` → Staking (staking, slashing, epochs)
 - **Serialization** — Deterministic length-prefixed binary encoding for all hashes. MessagePack for P2P wire format.
 - **Storage** — SQLite with WAL mode. Single serialized connection.
 
@@ -91,10 +91,10 @@ AXIOM__LOGGING__LEVEL=debug AXIOM_VALIDATOR_PRIVATE_KEY=<hex> cargo run -p axiom
 ```powershell
 .\scripts\run_local_testnet.ps1
 
-# Start at height 9999 (one block before V2 activation)
+# Start at height 9999 (one block before Staking activation)
 .\scripts\run_local_testnet.ps1 -FastForward
 
-# Start already in V2
+# Start already in Staking
 .\scripts\run_local_testnet.ps1 -FastForward -FastForwardHeight 10001
 ```
 
@@ -134,7 +134,7 @@ All config structs use `serde(deny_unknown_fields)`. Unknown keys are a hard err
 | GET | `/blocks/by-hash/:hash` | Block by hash |
 | GET | `/accounts/:id` | Account balance and nonce |
 | GET | `/validators` | Validator set |
-| GET | `/staking` | Staking state (V2) |
+| GET | `/staking` | Staking state (Staking protocol) |
 | GET | `/consensus` | Current consensus round state |
 | GET | `/network/peers` | Connected peers |
 | POST | `/transactions` | Submit a transaction |
@@ -196,7 +196,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 | Constant | Value |
 |----------|-------|
-| `V2_ACTIVATION_HEIGHT` | 10,000 |
+| `STAKING_ACTIVATION_HEIGHT` | 10,000 |
 | `MAX_TRANSACTIONS_PER_BLOCK` | 1,000 |
 | `MAX_BLOCK_SIZE_BYTES` | 1 MB |
 | `MIN_VALIDATOR_STAKE` | 100,000 |
