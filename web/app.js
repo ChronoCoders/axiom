@@ -343,7 +343,24 @@ function initOverview() {
   var blocksSeq    = 0;
 
   subscribeBlock(function (height, hash) {
-    refreshBlocks();
+    fetchJSON("/blocks/" + height).then(function (b) {
+      var tbody = el("recentBlocksTable");
+      if (!tbody) return;
+      var tr = document.createElement("tr");
+      tr.className = "clickable";
+      tr.innerHTML =
+        "<td>" + fmt(b.height) + "</td>" +
+        '<td data-tip="' + (b.hash || "") + '">' + shortHash(b.hash) + "</td>" +
+        '<td data-tip="' + (b.proposer_id || "") + '">' + shortHash(b.proposer_id) + "</td>" +
+        "<td>" + (b.transaction_count || 0) + "</td>" +
+        '<td class="text-muted">' + timeAgo(b.timestamp) + "</td>";
+      tr.addEventListener("click", function () {
+        window.location.href = "block.html?height=" + encodeURIComponent(b.height);
+      });
+      tbody.insertBefore(tr, tbody.firstChild);
+      var rows = tbody.querySelectorAll("tr");
+      if (rows.length > 10) tbody.removeChild(rows[rows.length - 1]);
+    }).catch(function () {});
   });
 
   subscribeStatus(function (s) {
