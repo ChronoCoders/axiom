@@ -72,22 +72,29 @@
       <!-- Controls -->
       <div class="card">
         <div class="card-body" style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;">
-          <div class="form-group" style="flex:0 0 120px;">
-            <label class="form-label">Limit</label>
+          <div class="form-group" style="flex:0 0 120px;margin-bottom:0;">
+            <label class="form-label">Per page</label>
             <input id="limitInput" class="form-input" type="number" min="1" max="1000" value="50"/>
           </div>
-          <div class="form-group" style="flex:1;min-width:160px;">
-            <label class="form-label">Start from height</label>
-            <input id="cursorInput" class="form-input" type="text" placeholder="leave blank for latest"/>
-          </div>
-          <button id="loadBtn" class="btn btn-primary">
-            <i class="fa-solid fa-rotate"></i> Load
+          <button id="latestBtn" class="btn btn-ghost" style="margin-bottom:1px;">
+            <i class="fa-solid fa-angles-up"></i> Latest
           </button>
         </div>
       </div>
 
       <!-- Table -->
       <div class="card">
+        <div class="card-header">
+          <span class="card-title" id="blocksRange" style="color:var(--text-2);font-weight:400;font-size:12px;"></span>
+          <div style="display:flex;gap:8px;">
+            <button id="newerBtn" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;" disabled>
+              <i class="fa-solid fa-arrow-up"></i> Newer
+            </button>
+            <button id="olderBtn" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">
+              <i class="fa-solid fa-arrow-down"></i> Older
+            </button>
+          </div>
+        </div>
         <div class="card-body no-pad">
           <div id="blocksError" class="error-msg" style="padding:14px 18px;"></div>
           <div class="table-scroll">
