@@ -81,7 +81,6 @@ function _startStatusPoll() {
 var _displayedHeight = null;
 var _targetHeight    = null;
 var _stepTimer       = null;
-var STEP_INTERVAL_MS = 400;
 
 function _stepToTarget() {
   if (_displayedHeight === null || _targetHeight === null) return;
@@ -108,9 +107,14 @@ function setHeight(newHeight) {
   }
   if (newHeight <= _displayedHeight) return;
   _targetHeight = newHeight;
-  if (_stepTimer === null) {
-    _stepTimer = setInterval(_stepToTarget, STEP_INTERVAL_MS);
+  var delta    = _targetHeight - _displayedHeight;
+  var interval = Math.round(1000 / Math.max(1, delta));
+  interval     = Math.max(100, Math.min(1000, interval));
+  if (_stepTimer !== null) {
+    clearInterval(_stepTimer);
+    _stepTimer = null;
   }
+  _stepTimer = setInterval(_stepToTarget, interval);
 }
 
 /* ---- DOM helpers ---- */
