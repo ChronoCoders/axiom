@@ -309,6 +309,8 @@ function initOverview() {
   var blocksSeq            = 0;
   var _latestFetchedHeight = 0;
 
+  setText("ovConsensus", "PBFT");
+
   subscribeBlock(function (height, hash) {
     fetchJSON("/blocks/" + height).then(function (b) {
       if (b.height <= _latestFetchedHeight) return;
@@ -345,11 +347,6 @@ function initOverview() {
       setText("ovTimestamp",  timeAgo(b.timestamp));
       var shEl = el("ovStateHash");
       if (shEl) shEl.setAttribute("data-tip", b.state_hash || "");
-    }).catch(function () {});
-    fetchJSON("/consensus").then(function (c) {
-      var h = c.next_height != null ? fmt(c.next_height) : "-";
-      var r = c.lock && c.lock.round != null ? c.lock.round : "-";
-      setText("ovConsensus", "Next: " + h + " · Round " + r);
     }).catch(function () {});
   });
 
