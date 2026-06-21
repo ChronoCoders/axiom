@@ -76,6 +76,31 @@ function _startStatusPoll() {
   setInterval(poll, 1000);
 }
 
+/* ---- SSE block events ---- */
+
+var _latestHashFromSSE = null;
+var _sseCallbacks = [];
+
+function subscribeBlock(fn) {
+  _sseCallbacks.push(fn);
+}
+
+function _onBlockEvent(height, hash) {
+  setHeight(height);
+  _latestHashFromSSE = hash;
+  _sseCallbacks.forEach(function (fn) { try { fn(height, hash); } catch (_) {} });
+}
+
+function _startSSE() {
+  var es = new EventSource("/events");
+  es.addEventListener("block", function (e) {
+    try {
+      var d = JSON.parse(e.data);
+      _onBlockEvent(d.height, d.hash);
+    } catch (_) {}
+  });
+}
+
 /* ---- Height stepper ---- */
 
 var _displayedHeight = null;
@@ -330,10 +355,13 @@ function initSidebarStatus() {
    ========================================================= */
 
 function initOverview() {
-  var lastHeight   = null;
   var txHistory    = [];
-  var firstLoad    = true;
   var blocksSeq    = 0;
+
+  subscribeBlock(function (height, hash) {
+    toast("New Block", "Block #" + fmt(height) + " committed");
+    refreshBlocks();
+  });
 
   subscribeStatus(function (s) {
     if (!s) { setPulse(false); return; }
@@ -347,13 +375,6 @@ function initOverview() {
     if (hashEl) {
       hashEl.textContent = shortHash(s.latest_block_hash || "");
       hashEl.setAttribute("data-tip", s.latest_block_hash || "");
-    }
-
-    var isNew = lastHeight !== null && s.height > lastHeight && !firstLoad;
-
-    if (isNew) {
-      toast("New Block", "Block #" + fmt(s.height) + " committed");
-      refreshBlocks();
     }
 
     if (s.height > 0) {
@@ -374,8 +395,6 @@ function initOverview() {
       setText("ovConsensus", "Next: " + h + " · Round " + r);
     }).catch(function () {});
 
-    lastHeight = s.height;
-    firstLoad  = false;
     setPulse(true);
   });
 
@@ -1001,6 +1020,7 @@ initTooltip();
 initSearch();
 initSidebarStatus();
 _startStatusPoll();
+_startSSE();
 
 var loc = window.location.pathname;
 if (loc.endsWith("/") || loc.endsWith("index.html")) {
