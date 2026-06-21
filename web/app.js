@@ -54,6 +54,28 @@ function fetchJSON(path) {
   });
 }
 
+/* ---- Shared status poll ---- */
+
+var _statusCache = null;
+var _statusCallbacks = [];
+
+function subscribeStatus(fn) {
+  _statusCallbacks.push(fn);
+}
+
+function _startStatusPoll() {
+  function poll() {
+    fetchJSON("/status").then(function (s) {
+      _statusCache = s;
+      _statusCallbacks.forEach(function (fn) { try { fn(s); } catch (_) {} });
+    }).catch(function () {
+      _statusCallbacks.forEach(function (fn) { try { fn(null); } catch (_) {} });
+    });
+  }
+  poll();
+  setInterval(poll, 1000);
+}
+
 /* ---- DOM helpers ---- */
 
 function el(id) { return document.getElementById(id); }
@@ -255,14 +277,11 @@ function doSearch(q, resultsEl) {
 /* ---- Sidebar status ticker ---- */
 
 function initSidebarStatus() {
-  function refresh() {
-    fetchJSON("/status").then(function (s) {
-      setText("sidebarHeight", "h " + fmt(s.height));
-      setPulse(true);
-    }).catch(function () { setPulse(false); });
-  }
-  refresh();
-  setInterval(refresh, 1000);
+  subscribeStatus(function (s) {
+    if (!s) { setPulse(false); return; }
+    setText("sidebarHeight", "h " + fmt(s.height));
+    setPulse(true);
+  });
 }
 
 /* =========================================================
@@ -275,50 +294,49 @@ function initOverview() {
   var firstLoad    = true;
   var blocksSeq    = 0;
 
-  function refreshStatus() {
-    fetchJSON("/status").then(function (s) {
-      setText("ovHeight", fmt(s.height));
-      setText("ovValidators", fmt(s.validator_count));
-      setText("ovSyncing",   s.syncing ? "Yes" : "No");
-      var _proto = s.protocol_version;
-      setText("ovProtocol", _proto === 1 ? "Transfer" : _proto === 2 ? "Staking" : _proto != null ? "v" + _proto : "-");
+  subscribeStatus(function (s) {
+    if (!s) { setPulse(false); return; }
+    setText("ovHeight", fmt(s.height));
+    setText("ovValidators", fmt(s.validator_count));
+    setText("ovSyncing",   s.syncing ? "Yes" : "No");
+    var _proto = s.protocol_version;
+    setText("ovProtocol", _proto === 1 ? "Transfer" : _proto === 2 ? "Staking" : _proto != null ? "v" + _proto : "-");
 
-      var hashEl = el("ovLatestHash");
-      if (hashEl) {
-        hashEl.textContent = shortHash(s.latest_block_hash || "");
-        hashEl.setAttribute("data-tip", s.latest_block_hash || "");
-      }
+    var hashEl = el("ovLatestHash");
+    if (hashEl) {
+      hashEl.textContent = shortHash(s.latest_block_hash || "");
+      hashEl.setAttribute("data-tip", s.latest_block_hash || "");
+    }
 
-      var isNew = lastHeight !== null && s.height > lastHeight && !firstLoad;
+    var isNew = lastHeight !== null && s.height > lastHeight && !firstLoad;
 
-      if (isNew) {
-        toast("New Block", "Block #" + fmt(s.height) + " committed");
-        refreshBlocks();
-      }
+    if (isNew) {
+      toast("New Block", "Block #" + fmt(s.height) + " committed");
+      refreshBlocks();
+    }
 
-      if (s.height > 0) {
-        fetchJSON("/blocks/" + s.height).then(function (blk) {
-          setText("ovStateHash",  shortHash(blk.state_hash || ""));
-          setText("ovProposer",   shortHash(blk.proposer_id || ""));
-          setText("ovTxCount",    fmt(blk.transaction_count || 0));
-          setText("ovTimestamp",  timeAgo(blk.timestamp));
+    if (s.height > 0) {
+      fetchJSON("/blocks/" + s.height).then(function (blk) {
+        setText("ovStateHash",  shortHash(blk.state_hash || ""));
+        setText("ovProposer",   shortHash(blk.proposer_id || ""));
+        setText("ovTxCount",    fmt(blk.transaction_count || 0));
+        setText("ovTimestamp",  timeAgo(blk.timestamp));
 
-          var shEl = el("ovStateHash");
-          if (shEl) shEl.setAttribute("data-tip", blk.state_hash || "");
-        }).catch(function () {});
-      }
-
-      lastHeight = s.height;
-      firstLoad  = false;
-      setPulse(true);
-    }).catch(function () { setPulse(false); });
+        var shEl = el("ovStateHash");
+        if (shEl) shEl.setAttribute("data-tip", blk.state_hash || "");
+      }).catch(function () {});
+    }
 
     fetchJSON("/consensus").then(function (c) {
       var h = c.next_height != null ? fmt(c.next_height) : "-";
       var r = c.lock && c.lock.round != null ? c.lock.round : "-";
       setText("ovConsensus", "Next: " + h + " · Round " + r);
     }).catch(function () {});
-  }
+
+    lastHeight = s.height;
+    firstLoad  = false;
+    setPulse(true);
+  });
 
   function refreshBlocks() {
     var seq = ++blocksSeq;
@@ -388,12 +406,10 @@ function initOverview() {
     if (lbl) lbl.textContent = text;
   }
 
-  refreshStatus();
   refreshBlocks();
   refreshPeers();
   refreshHealth();
 
-  setInterval(refreshStatus, 1000);
   setInterval(refreshPeers, 15000);
 }
 
@@ -943,6 +959,7 @@ function initTransactions() {
 initTooltip();
 initSearch();
 initSidebarStatus();
+_startStatusPoll();
 
 var loc = window.location.pathname;
 if (loc.endsWith("/") || loc.endsWith("index.html")) {
