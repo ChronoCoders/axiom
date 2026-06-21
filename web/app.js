@@ -262,7 +262,7 @@ function initSidebarStatus() {
     }).catch(function () { setPulse(false); });
   }
   refresh();
-  setInterval(refresh, 5000);
+  setInterval(refresh, 1000);
 }
 
 /* =========================================================
@@ -276,7 +276,7 @@ function initOverview() {
 
   function refreshStatus() {
     fetchJSON("/status").then(function (s) {
-      setText("ovHeight",    fmt(s.height));
+      setText("ovHeight", fmt(s.height));
       setText("ovValidators", fmt(s.validator_count));
       setText("ovSyncing",   s.syncing ? "Yes" : "No");
       var _proto = s.protocol_version;
@@ -391,7 +391,7 @@ function initOverview() {
   refreshPeers();
   refreshHealth();
 
-  setInterval(refreshStatus, 4000);
+  setInterval(refreshStatus, 1000);
   setInterval(refreshBlocks, 10000);
   setInterval(refreshPeers, 15000);
 }
@@ -401,26 +401,38 @@ function initOverview() {
    ========================================================= */
 
 function initBlocks() {
-  var limitEl  = el("limitInput");
-  var cursorEl = el("cursorInput");
-  var loadBtn  = el("loadBtn");
-  var tableEl  = el("blocksTable");
-  var errorEl  = el("blocksError");
+  var limitEl   = el("limitInput");
+  var tableEl   = el("blocksTable");
+  var errorEl   = el("blocksError");
+  var rangeEl   = el("blocksRange");
+  var newerBtn  = el("newerBtn");
+  var olderBtn  = el("olderBtn");
+  var latestBtn = el("latestBtn");
 
-  function load() {
-    errorEl.textContent = "";
-    tableEl.innerHTML = "";
-    var limit  = (limitEl  && limitEl.value)  ? limitEl.value  : "50";
-    var cursor = (cursorEl && cursorEl.value) ? cursorEl.value : "";
+  var currentMin = null;
+  var currentMax = null;
+
+  function load(cursor) {
+    if (errorEl) errorEl.textContent = "";
+    if (tableEl) tableEl.innerHTML = '<tr><td colspan="6" class="table-empty">Loading...</td></tr>';
+    var limit = (limitEl && limitEl.value) ? parseInt(limitEl.value, 10) : 50;
     var qs = new URLSearchParams();
     qs.set("limit", limit);
-    if (cursor) qs.set("cursor", cursor);
+    if (cursor != null) qs.set("cursor", cursor);
 
     fetchJSON("/blocks?" + qs.toString()).then(function (blocks) {
       if (!blocks || !blocks.length) {
         tableEl.innerHTML = '<tr><td colspan="6" class="table-empty">No blocks found</td></tr>';
+        currentMin = null;
+        currentMax = null;
+        updateControls(limit, cursor);
         return;
       }
+
+      currentMax = blocks[0].height;
+      currentMin = blocks[blocks.length - 1].height;
+
+      tableEl.innerHTML = "";
       blocks.forEach(function (b) {
         var tr = document.createElement("tr");
         tr.className = "clickable";
@@ -436,13 +448,48 @@ function initBlocks() {
         });
         tableEl.appendChild(tr);
       });
+
+      updateControls(limit, cursor);
     }).catch(function (e) {
-      errorEl.textContent = e.message;
+      if (errorEl) errorEl.textContent = e.message;
+      if (tableEl) tableEl.innerHTML = "";
     });
   }
 
-  if (loadBtn) loadBtn.addEventListener("click", load);
-  load();
+  function updateControls(limit, cursor) {
+    if (rangeEl) {
+      if (currentMin != null && currentMax != null) {
+        rangeEl.textContent = "Heights " + fmt(currentMin) + " – " + fmt(currentMax);
+      } else {
+        rangeEl.textContent = "";
+      }
+    }
+    var atLatest = cursor == null;
+    if (newerBtn) newerBtn.disabled = atLatest || currentMax == null;
+    if (olderBtn) olderBtn.disabled = currentMin == null || currentMin <= 1;
+  }
+
+  if (newerBtn) newerBtn.addEventListener("click", function () {
+    if (currentMax == null) return;
+    var limit = (limitEl && limitEl.value) ? parseInt(limitEl.value, 10) : 50;
+    var newCursor = currentMax + limit + 1;
+    load(newCursor);
+  });
+
+  if (olderBtn) olderBtn.addEventListener("click", function () {
+    if (currentMin == null) return;
+    load(currentMin);
+  });
+
+  if (latestBtn) latestBtn.addEventListener("click", function () {
+    load(null);
+  });
+
+  if (limitEl) limitEl.addEventListener("change", function () {
+    load(null);
+  });
+
+  load(null);
 }
 
 /* =========================================================
