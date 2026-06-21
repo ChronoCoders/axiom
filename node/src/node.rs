@@ -206,6 +206,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
 
     let mut shutdown_rx_api = shutdown_rx.resubscribe();
 
+    let (block_tx, _) = tokio::sync::broadcast::channel(16);
     let app_state = Arc::new(AppState {
         storage: storage.clone(),
         mempool: mempool.clone(),
@@ -214,7 +215,9 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
         console_user: config.console.user.clone(),
         console_pass: config.console.password.clone(),
         max_tx_bytes,
+        block_tx,
     });
+    let block_sender = app_state.block_sender();
 
     let api_addr = match config.api.bind_address.parse::<std::net::SocketAddr>() {
         Ok(addr) => addr,
@@ -559,6 +562,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                                                     *sg = new_state;
                                                                     *stk = new_staking;
                                                                     current_height.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                                                    let _ = block_sender.send((block.height, hex::encode(compute_block_hash(&block).0)));
                                                                     tracing::info!("Sync: committed block {}", block.height);
                                                                     ss.next_to_request += 1;
                                                                     sync_waiting = false;
@@ -924,6 +928,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
 
                                     current_height
                                         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                    let _ = block_sender.send((block.height, hex::encode(compute_block_hash(&block).0)));
                                     reset_bft = true;
                                 }
                                 Err(e) => {
@@ -1168,6 +1173,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                                 *state_guard = new_state;
                                                 *staking_guard = new_staking;
                                                 current_height.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                                let _ = block_sender.send((block.height, hex::encode(compute_block_hash(&block).0)));
                                                 bft_engine = None;
                                                 bft_step_started_at = None;
                                             }
@@ -1498,6 +1504,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                             .collect();
                                         mempool_guard.remove_batch(&tx_hashes);
 
+                                        let _ = block_sender.send((final_block.height, hex::encode(block_hash.0)));
                                         committed = true;
                                     }
                                     Err(e) => {
