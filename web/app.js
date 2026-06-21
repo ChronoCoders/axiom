@@ -273,6 +273,7 @@ function initOverview() {
   var lastHeight   = null;
   var txHistory    = [];
   var firstLoad    = true;
+  var blocksSeq    = 0;
 
   function refreshStatus() {
     fetchJSON("/status").then(function (s) {
@@ -290,6 +291,11 @@ function initOverview() {
 
       var isNew = lastHeight !== null && s.height > lastHeight && !firstLoad;
 
+      if (isNew) {
+        toast("New Block", "Block #" + fmt(s.height) + " committed");
+        refreshBlocks();
+      }
+
       if (s.height > 0) {
         fetchJSON("/blocks/" + s.height).then(function (blk) {
           setText("ovStateHash",  shortHash(blk.state_hash || ""));
@@ -299,14 +305,6 @@ function initOverview() {
 
           var shEl = el("ovStateHash");
           if (shEl) shEl.setAttribute("data-tip", blk.state_hash || "");
-
-          if (isNew) {
-            toast("New Block", "Block #" + fmt(s.height) + " committed");
-            txHistory.push(blk.transaction_count || 0);
-            if (txHistory.length > 20) txHistory.shift();
-            renderSparkline("sparkTx", txHistory);
-            refreshBlocks();
-          }
         }).catch(function () {});
       }
 
@@ -323,11 +321,15 @@ function initOverview() {
   }
 
   function refreshBlocks() {
+    var seq = ++blocksSeq;
     fetchJSON("/blocks?limit=10").then(function (blocks) {
+      if (seq !== blocksSeq) return;
       var tbody = el("recentBlocksTable");
       if (!tbody) return;
       if (!blocks || !blocks.length) {
         tbody.innerHTML = '<tr><td colspan="5" class="table-empty">No blocks yet</td></tr>';
+        txHistory = [];
+        renderSparkline("sparkTx", txHistory);
         return;
       }
       tbody.innerHTML = "";
@@ -392,7 +394,6 @@ function initOverview() {
   refreshHealth();
 
   setInterval(refreshStatus, 1000);
-  setInterval(refreshBlocks, 10000);
   setInterval(refreshPeers, 15000);
 }
 
