@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>AXIOM &bull; Validators</title>
+  <title>AXIOM &bull; Staking</title>
   <link rel="stylesheet" href="styles.css"/>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 </head>
@@ -25,8 +25,8 @@
         <li><a href="index.html"><i class="fa-solid fa-gauge-high"></i> Overview</a></li>
         <li><a href="blocks.html"><i class="fa-solid fa-cube"></i> Blocks</a></li>
         <li><a href="accounts.html"><i class="fa-solid fa-wallet"></i> Accounts</a></li>
-        <li><a href="validators.html" class="active"><i class="fa-solid fa-shield-halved"></i> Validators</a></li>
-        <li><a href="staking.html"><i class="fa-solid fa-coins"></i> Staking</a></li>
+        <li><a href="validators.html"><i class="fa-solid fa-shield-halved"></i> Validators</a></li>
+        <li><a href="staking.html" class="active"><i class="fa-solid fa-coins"></i> Staking</a></li>
         <li><a href="tx.html"><i class="fa-solid fa-paper-plane"></i> Transactions</a></li>
       </ul>
     </div>
@@ -50,15 +50,15 @@
       <a href="index.html"><i class="fa-solid fa-gauge-high"></i> Overview</a>
       <a href="blocks.html"><i class="fa-solid fa-cube"></i> Blocks</a>
       <a href="accounts.html"><i class="fa-solid fa-wallet"></i> Accounts</a>
-      <a href="validators.html" class="active"><i class="fa-solid fa-shield-halved"></i> Validators</a>
-      <a href="staking.html"><i class="fa-solid fa-coins"></i> Staking</a>
+      <a href="validators.html"><i class="fa-solid fa-shield-halved"></i> Validators</a>
+      <a href="staking.html" class="active"><i class="fa-solid fa-coins"></i> Staking</a>
       <a href="tx.html"><i class="fa-solid fa-paper-plane"></i> Transactions</a>
     </nav>
 
     <div class="page-header">
       <div>
-        <div class="page-title">Validators</div>
-        <div class="page-subtitle">Active validator set and quorum metrics</div>
+        <div class="page-title">Staking</div>
+        <div class="page-subtitle">V2 staking state — active from height 10,000</div>
       </div>
       <div class="search-wrapper">
         <i class="fa-solid fa-magnifying-glass search-icon"></i>
@@ -69,47 +69,90 @@
 
     <div class="content">
 
-      <!-- Metrics -->
-      <div class="metrics">
-        <div class="metric-card">
-          <div class="metric-label"><i class="fa-solid fa-users"></i>&nbsp; Total</div>
-          <div class="metric-value" id="valCount"><span class="skeleton sk-w-sm"></span></div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label"><i class="fa-solid fa-circle-check"></i>&nbsp; Active</div>
-          <div class="metric-value" id="valActive"><span class="skeleton sk-w-sm"></span></div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label"><i class="fa-solid fa-bolt"></i>&nbsp; Total Power</div>
-          <div class="metric-value" id="valTotal"><span class="skeleton sk-w-sm"></span></div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label"><i class="fa-solid fa-gavel"></i>&nbsp; Quorum</div>
-          <div class="metric-value sm" id="valQuorum"><span class="skeleton sk-w-md"></span></div>
+      <div id="stakingError" class="error-msg" style="margin-bottom:12px;"></div>
+
+      <div id="stakingNotice" class="card" style="border-left:3px solid var(--accent);margin-bottom:4px;">
+        <div class="card-body" style="display:flex;align-items:center;gap:10px;color:var(--text-2);font-size:13px;">
+          <i class="fa-solid fa-circle-info" style="color:var(--accent);"></i>
+          Staking is inactive in V1 mode. It activates automatically at height&nbsp;10,000.
         </div>
       </div>
 
-      <!-- Table -->
+      <div class="metrics">
+        <div class="metric-card">
+          <div class="metric-label"><i class="fa-solid fa-toggle-on"></i>&nbsp; Status</div>
+          <div class="metric-value sm" id="stEnabled"><span class="skeleton sk-w-md"></span></div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label"><i class="fa-solid fa-rotate"></i>&nbsp; Epoch</div>
+          <div class="metric-value" id="stEpoch"><span class="skeleton sk-w-sm"></span></div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label"><i class="fa-solid fa-arrow-down-to-line"></i>&nbsp; Min Stake</div>
+          <div class="metric-value sm" id="stMinStake"><span class="skeleton sk-w-md"></span></div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label"><i class="fa-solid fa-hourglass-half"></i>&nbsp; Unbonding</div>
+          <div class="metric-value sm" id="stUnbonding"><span class="skeleton sk-w-md"></span></div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label"><i class="fa-solid fa-gavel"></i>&nbsp; Evidence</div>
+          <div class="metric-value" id="stEvidence"><span class="skeleton sk-w-sm"></span></div>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-header">
-          <span class="card-title"><i class="fa-solid fa-shield-halved"></i>&nbsp; Validator Set</span>
+          <span class="card-title"><i class="fa-solid fa-coins"></i>&nbsp; Active Stakes</span>
         </div>
         <div class="card-body no-pad">
-          <div id="validatorsError" class="error-msg" style="padding:14px 18px;"></div>
           <div class="table-scroll">
             <table>
               <thead>
                 <tr>
                   <th>Validator ID</th>
-                  <th>Power</th>
-                  <th>Stake</th>
-                  <th>Account</th>
-                  <th>Jailed</th>
-                  <th>Status</th>
+                  <th>Amount</th>
                 </tr>
               </thead>
-              <tbody id="validatorsTable">
-                <tr><td colspan="6" class="table-empty">Loading...</td></tr>
+              <tbody id="stakesTable">
+                <tr><td colspan="2" class="table-empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title"><i class="fa-solid fa-hourglass-half"></i>&nbsp; Unbonding Queue</span>
+        </div>
+        <div class="card-body no-pad">
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Validator ID</th>
+                  <th>Amount</th>
+                  <th>Release Height</th>
+                </tr>
+              </thead>
+              <tbody id="unbondingTable">
+                <tr><td colspan="3" class="table-empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title"><i class="fa-solid fa-ban"></i>&nbsp; Jailed Validators</span>
+        </div>
+        <div class="card-body no-pad">
+          <div class="table-scroll">
+            <table>
+              <tbody id="jailedTable">
+                <tr><td class="table-empty">Loading...</td></tr>
               </tbody>
             </table>
           </div>

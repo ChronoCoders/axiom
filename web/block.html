@@ -5,86 +5,170 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>AXIOM &bull; Block</title>
   <link rel="stylesheet" href="styles.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 </head>
-<body class="page-enter">
-  <header class="topbar">
-    <div class="brand">AXIOM <span class="pulse-dot" id="livePulse" title="Chain active"></span></div>
-    <nav class="nav">
-      <a href="index.html">Overview</a>
-      <a href="blocks.html" class="active">Blocks</a>
-      <a href="accounts.html">Accounts</a>
-      <a href="validators.html">Validators</a>
-    </nav>
-    <div class="search-wrapper">
-      <input type="text" id="globalSearch" class="search-input" placeholder="Search block height, hash, or account..." />
-      <div class="search-results" id="searchResults"></div>
+<body>
+<div class="shell">
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+          <path d="M10 2L3 6.5v7L10 18l7-4.5v-7L10 2zm0 2.24L15.2 7.5v5L10 15.76 4.8 12.5v-5L10 4.24z"/>
+        </svg>
+      </div>
+      <div class="sidebar-wordmark">AXIOM<span>Operator Console</span></div>
     </div>
-    <div class="meta"></div>
-    <button class="logout-btn" onclick="logout()">Logout</button>
-  </header>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Navigation</div>
+      <ul class="sidebar-nav">
+        <li><a href="index.html"><i class="fa-solid fa-gauge-high"></i> Overview</a></li>
+        <li><a href="blocks.html" class="active"><i class="fa-solid fa-cube"></i> Blocks</a></li>
+        <li><a href="accounts.html"><i class="fa-solid fa-wallet"></i> Accounts</a></li>
+        <li><a href="validators.html"><i class="fa-solid fa-shield-halved"></i> Validators</a></li>
+        <li><a href="staking.html"><i class="fa-solid fa-coins"></i> Staking</a></li>
+        <li><a href="tx.html"><i class="fa-solid fa-paper-plane"></i> Transactions</a></li>
+      </ul>
+    </div>
+    <div class="sidebar-bottom">
+      <div class="sidebar-status">
+        <span class="pulse-dot" id="livePulse"></span>
+        <span class="sidebar-status-text" id="chainStatus">Connecting...</span>
+        <span class="sidebar-status-text" id="sidebarHeight" style="text-align:right;flex-shrink:0;"></span>
+      </div>
+      <button class="sidebar-logout" onclick="logout()"><i class="fa-solid fa-arrow-right-from-bracket"></i> Sign out</button>
+    </div>
+  </aside>
 
-  <div id="toastContainer" class="toast-container"></div>
+  <div class="mobile-topbar">
+    <div class="sidebar-wordmark">AXIOM <span style="display:inline;font-size:9px;color:var(--text-3);">CONSOLE</span></div>
+    <button class="btn btn-ghost" style="font-size:12px;padding:5px 10px;" onclick="logout()">Sign out</button>
+  </div>
 
-  <main class="container">
-    <section class="section">
-      <h2 class="section-title">Block</h2>
-      <div id="blockError" class="text-muted"></div>
-      <div class="grid">
-        <div><label>Height</label><span class="value mono" id="blkHeight"><span class="skeleton sk-sm"></span></span></div>
-        <div><label>Epoch</label><span class="value mono" id="blkEpoch"><span class="skeleton sk-sm"></span></span></div>
-        <div>
-          <label>Block Hash</label>
-          <span class="value mono truncate" id="blkHash"><span class="skeleton"></span></span>
-          <span class="copy-link" id="copyHash">copy</span>
+  <div class="main">
+    <nav class="mobile-nav">
+      <a href="index.html"><i class="fa-solid fa-gauge-high"></i> Overview</a>
+      <a href="blocks.html" class="active"><i class="fa-solid fa-cube"></i> Blocks</a>
+      <a href="accounts.html"><i class="fa-solid fa-wallet"></i> Accounts</a>
+      <a href="validators.html"><i class="fa-solid fa-shield-halved"></i> Validators</a>
+      <a href="staking.html"><i class="fa-solid fa-coins"></i> Staking</a>
+      <a href="tx.html"><i class="fa-solid fa-paper-plane"></i> Transactions</a>
+    </nav>
+
+    <div class="page-header">
+      <div>
+        <div class="page-title">Block <span id="blkHeight" style="color:var(--amber);"></span></div>
+        <div class="page-subtitle">Block detail and transactions</div>
+      </div>
+      <div class="search-wrapper">
+        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+        <input type="text" id="globalSearch" class="search-input" placeholder="Block height, hash, account..."/>
+        <div class="search-results" id="searchResults"></div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <div id="blockError" class="error-msg"></div>
+
+      <!-- Block header card -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title"><i class="fa-solid fa-cube"></i>&nbsp; Header</span>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button class="copy-btn" id="copyHash"><i class="fa-regular fa-copy"></i> Copy hash</button>
+          </div>
         </div>
-        <div><label>Parent Hash</label><span class="value mono truncate" id="parentHash"><span class="skeleton"></span></span></div>
-        <div><label>Proposer</label><span class="value mono truncate" id="blkProposer"><span class="skeleton"></span></span></div>
-        <div><label>State Hash</label><span class="value mono truncate" id="stateHash"><span class="skeleton"></span></span></div>
-        <div><label>Timestamp</label><span class="value mono" id="blkTimestamp"><span class="skeleton"></span></span></div>
+        <div class="card-body">
+          <div class="detail-grid">
+            <div class="detail-item">
+              <label>Epoch</label>
+              <span class="detail-value" id="blkEpoch"><span class="skeleton sk-w-sm"></span></span>
+            </div>
+            <div class="detail-item">
+              <label>Timestamp</label>
+              <span class="detail-value" id="blkTimestamp"><span class="skeleton sk-w-lg"></span></span>
+            </div>
+            <div class="detail-item">
+              <label>Transactions</label>
+              <span class="detail-value" id="blkTxCount"><span class="skeleton sk-w-sm"></span></span>
+            </div>
+            <div class="detail-item" style="grid-column:1/-1;">
+              <label>Block Hash</label>
+              <span class="detail-value" id="blkHash" data-tip=""><span class="skeleton sk-w-lg"></span></span>
+            </div>
+            <div class="detail-item" style="grid-column:1/-1;">
+              <label>Parent Hash</label>
+              <span class="detail-value" id="parentHash" data-tip=""><span class="skeleton sk-w-lg"></span></span>
+            </div>
+            <div class="detail-item" style="grid-column:1/-1;">
+              <label>Proposer</label>
+              <span class="detail-value" id="blkProposer" data-tip=""><span class="skeleton sk-w-lg"></span></span>
+            </div>
+            <div class="detail-item" style="grid-column:1/-1;">
+              <label>State Hash</label>
+              <span class="detail-value" id="stateHash" data-tip=""><span class="skeleton sk-w-lg"></span></span>
+            </div>
+          </div>
+        </div>
+        <div class="block-nav">
+          <a id="prevBlock" href="#"><i class="fa-solid fa-arrow-left"></i> Previous</a>
+          <a id="nextBlock" href="#">Next <i class="fa-solid fa-arrow-right"></i></a>
+        </div>
       </div>
-      <div class="block-nav">
-        <a id="prevBlock" href="#">&larr; Previous</a>
-        <a id="nextBlock" href="#">Next &rarr;</a>
-      </div>
-    </section>
 
-    <section class="section">
-      <h2 class="section-title">Transactions <span class="text-secondary" id="txCount">0</span></h2>
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Sender</th>
-              <th>Recipient</th>
-              <th>Amount</th>
-              <th>Nonce</th>
-            </tr>
-          </thead>
-          <tbody id="txTable"></tbody>
-        </table>
+      <!-- Transactions -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title"><i class="fa-solid fa-right-left"></i>&nbsp; Transactions</span>
+        </div>
+        <div class="card-body no-pad">
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Sender</th>
+                  <th>Recipient</th>
+                  <th>Amount</th>
+                  <th>Nonce</th>
+                </tr>
+              </thead>
+              <tbody id="txTable"></tbody>
+            </table>
+          </div>
+          <div id="txEmpty" class="table-empty" style="display:none;">No transactions in this block</div>
+        </div>
       </div>
-      <div id="txEmpty" class="empty" style="display:none;">No transactions in this block</div>
-    </section>
 
-    <section class="section">
-      <h2 class="section-title">Signatures</h2>
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Validator</th>
-              <th>Signature</th>
-            </tr>
-          </thead>
-          <tbody id="sigTable"></tbody>
-        </table>
+      <!-- Signatures -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title"><i class="fa-solid fa-signature"></i>&nbsp; Quorum Signatures</span>
+        </div>
+        <div class="card-body no-pad">
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Validator</th>
+                  <th>Signature</th>
+                </tr>
+              </thead>
+              <tbody id="sigTable"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
-    </section>
-  </main>
 
-  <footer class="footer">AXIOM Console &middot; Read-only</footer>
-  <div class="tooltip" id="tooltip"></div>
-  <script src="app.js"></script>
+    </div>
+
+    <div class="page-footer">AXIOM Console &middot; Read-only</div>
+  </div>
+</div>
+
+<div id="toastContainer" class="toast-container"></div>
+<div id="tooltip" class="tooltip"></div>
+<script src="app.js"></script>
 </body>
 </html>

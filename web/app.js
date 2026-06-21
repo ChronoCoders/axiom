@@ -1,9 +1,14 @@
+/* =========================================================
+   AXIOM Console — app.js
+   Vanilla JS. No frameworks. Auth via localStorage.
+   ========================================================= */
+
 var API_BASE = "/api";
 
-/* ---- Auth Gate ---- */
+/* ---- Auth ---- */
 
 (function checkAuth() {
-  var token = sessionStorage.getItem("axiom_token");
+  var token = localStorage.getItem("axiom_token");
   if (!token) {
     window.location.href = "login.html";
     return;
@@ -14,15 +19,15 @@ var API_BASE = "/api";
     body: JSON.stringify({ token: token })
   }).then(function (res) {
     if (!res.ok) {
-      sessionStorage.removeItem("axiom_token");
+      localStorage.removeItem("axiom_token");
       window.location.href = "login.html";
     }
   }).catch(function () {});
 })();
 
 function logout() {
-  var token = sessionStorage.getItem("axiom_token");
-  sessionStorage.removeItem("axiom_token");
+  var token = localStorage.getItem("axiom_token");
+  localStorage.removeItem("axiom_token");
   if (token) {
     fetch("/auth/logout", {
       method: "POST",
@@ -33,11 +38,12 @@ function logout() {
   window.location.href = "login.html";
 }
 
-/* ---- Utilities ---- */
+/* ---- API ---- */
 
 function fetchJSON(path) {
-  var token = sessionStorage.getItem("axiom_token");
-  var headers = token ? { "Authorization": "Bearer " + token } : {};
+  var token = localStorage.getItem("axiom_token");
+  var headers = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = "Bearer " + token;
   return fetch(API_BASE + path, { headers: headers }).then(function (res) {
     if (!res.ok) {
       var err = new Error(res.status === 404 ? "Not found" : "Request failed (" + res.status + ")");
@@ -48,196 +54,164 @@ function fetchJSON(path) {
   });
 }
 
-function set(id, value) {
-  var el = document.getElementById(id);
-  if (!el) return;
-  var sk = el.querySelector(".skeleton");
+/* ---- DOM helpers ---- */
+
+function el(id) { return document.getElementById(id); }
+
+function setText(id, value) {
+  var node = el(id);
+  if (!node) return;
+  var sk = node.querySelector(".skeleton");
   if (sk) sk.remove();
-  el.textContent = value;
+  node.textContent = value != null ? String(value) : "-";
 }
 
 function setHTML(id, html) {
-  var el = document.getElementById(id);
-  if (!el) return;
-  el.innerHTML = html;
+  var node = el(id);
+  if (node) node.innerHTML = html;
 }
 
-function show(id) {
-  var el = document.getElementById(id);
-  if (el) el.style.display = "";
-}
+function show(id) { var node = el(id); if (node) node.style.display = ""; }
+function hide(id) { var node = el(id); if (node) node.style.display = "none"; }
 
-function hide(id) {
-  var el = document.getElementById(id);
-  if (el) el.style.display = "none";
-}
+/* ---- Formatters ---- */
 
-function formatNumber(n) {
+function fmt(n) {
   if (n == null) return "-";
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
-function truncateHash(hash) {
+function shortHash(hash) {
   if (!hash || hash.length <= 16) return hash || "";
   return hash.slice(0, 8) + "\u2026" + hash.slice(-8);
 }
 
-function copyWithFeedback(text, el) {
-  if (!text) return;
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(text).then(function () {
-      if (el) {
-        var orig = el.textContent;
-        el.textContent = "copied";
-        el.classList.add("copied");
-        setTimeout(function () {
-          el.textContent = orig;
-          el.classList.remove("copied");
-        }, 1200);
-      }
-    });
-  }
-}
-
-function getQuery() {
-  return new URLSearchParams(window.location.search);
-}
-
-function setHealth(id, ok) {
-  var el = document.getElementById(id);
-  if (!el) return;
-  var dot = el.querySelector(".status-dot");
-  if (dot) dot.className = "status-dot " + (ok ? "ok" : "err");
-  var span = el.querySelector(".health-text");
-  if (span) span.textContent = ok ? "ok" : "unavailable";
-}
-
-function statusBadge(active) {
-  if (active) return '<span class="badge badge-success">active</span>';
-  return '<span class="badge badge-danger">inactive</span>';
-}
-
-function timeAgo(isoString) {
-  if (!isoString) return "";
-  var diff = Math.max(0, Math.floor((Date.now() - new Date(isoString).getTime()) / 1000));
-  if (diff < 5) return "just now";
-  if (diff < 60) return diff + "s ago";
-  if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+function timeAgo(ts) {
+  if (!ts) return "";
+  var t = typeof ts === "number" ? ts * 1000 : new Date(ts).getTime();
+  var diff = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (diff < 5)     return "just now";
+  if (diff < 60)    return diff + "s ago";
+  if (diff < 3600)  return Math.floor(diff / 60) + "m ago";
   if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
   return Math.floor(diff / 86400) + "d ago";
 }
 
-/* ---- Toast Notifications ---- */
+function fmtTimestamp(ts) {
+  if (!ts) return "-";
+  var t = typeof ts === "number" ? ts * 1000 : new Date(ts).getTime();
+  return new Date(t).toUTCString().replace(" GMT", " UTC");
+}
 
-function showToast(title, message) {
-  var container = document.getElementById("toastContainer");
-  if (!container) return;
-  var toast = document.createElement("div");
-  toast.className = "toast";
-  toast.innerHTML = '<div class="toast-title">' + title + '</div><div>' + message + '</div>';
-  container.appendChild(toast);
-  setTimeout(function () {
-    toast.classList.add("toast-exit");
+function statusBadge(active) {
+  if (active) return '<span class="badge badge-green">Active</span>';
+  return '<span class="badge badge-red">Inactive</span>';
+}
+
+function getQuery() { return new URLSearchParams(window.location.search); }
+
+/* ---- Copy ---- */
+
+function copyWithFeedback(text, btn) {
+  if (!text || !navigator.clipboard) return;
+  navigator.clipboard.writeText(text).then(function () {
+    if (!btn) return;
+    var orig = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-check"></i> Copied';
+    btn.classList.add("copied");
     setTimeout(function () {
-      if (toast.parentNode) toast.parentNode.removeChild(toast);
-    }, 300);
+      btn.innerHTML = orig;
+      btn.classList.remove("copied");
+    }, 1400);
+  });
+}
+
+/* ---- Toast ---- */
+
+function toast(title, message) {
+  var c = el("toastContainer");
+  if (!c) return;
+  var t = document.createElement("div");
+  t.className = "toast";
+  t.innerHTML = '<div class="toast-title">' + title + "</div>" +
+                '<div style="margin-top:2px;">' + (message || "") + "</div>";
+  c.appendChild(t);
+  setTimeout(function () {
+    t.classList.add("toast-exit");
+    setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 300);
   }, 3500);
 }
 
-/* ---- Tooltip System ---- */
+/* ---- Tooltip ---- */
 
-var tooltipEl = null;
+var _tip = null;
 
 function initTooltip() {
-  tooltipEl = document.getElementById("tooltip");
-  if (!tooltipEl) return;
-
+  _tip = el("tooltip");
+  if (!_tip) return;
   document.addEventListener("mouseover", function (e) {
     var target = e.target.closest("[data-tip]");
     if (target) {
-      tooltipEl.textContent = target.getAttribute("data-tip");
-      tooltipEl.classList.add("visible");
-      positionTooltip(e);
+      _tip.textContent = target.getAttribute("data-tip");
+      _tip.classList.add("visible");
     }
   });
-
   document.addEventListener("mousemove", function (e) {
-    if (tooltipEl.classList.contains("visible")) {
-      positionTooltip(e);
-    }
+    if (!_tip || !_tip.classList.contains("visible")) return;
+    var x = e.clientX + 14, y = e.clientY + 14;
+    if (x + 460 > window.innerWidth) x = e.clientX - 460;
+    if (y + 50 > window.innerHeight) y = e.clientY - 50;
+    _tip.style.left = x + "px";
+    _tip.style.top  = y + "px";
   });
-
   document.addEventListener("mouseout", function (e) {
-    var target = e.target.closest("[data-tip]");
-    if (target) {
-      tooltipEl.classList.remove("visible");
-    }
+    if (e.target.closest("[data-tip]")) _tip.classList.remove("visible");
   });
 }
 
-function positionTooltip(e) {
-  if (!tooltipEl) return;
-  var x = e.clientX + 12;
-  var y = e.clientY + 12;
-  if (x + 300 > window.innerWidth) x = e.clientX - 300;
-  if (y + 40 > window.innerHeight) y = e.clientY - 40;
-  tooltipEl.style.left = x + "px";
-  tooltipEl.style.top = y + "px";
-}
+/* ---- Sparkline ---- */
 
-/* ---- Sparkline Charts ---- */
-
-function renderSparkline(containerId, data, maxVal) {
-  var container = document.getElementById(containerId);
-  if (!container) return;
-  container.innerHTML = "";
-  if (!data || data.length === 0) return;
-  var max = maxVal || Math.max.apply(null, data) || 1;
-  data.forEach(function (val) {
+function renderSparkline(id, data) {
+  var c = el(id);
+  if (!c || !data || !data.length) return;
+  c.innerHTML = "";
+  var max = Math.max.apply(null, data) || 1;
+  data.forEach(function (v) {
     var bar = document.createElement("div");
     bar.className = "sparkline-bar";
-    var pct = Math.min(100, Math.max(2, (val / max) * 100));
-    bar.style.height = pct + "%";
-    bar.setAttribute("data-tip", String(val));
-    container.appendChild(bar);
+    bar.style.height = Math.max(4, Math.round((v / max) * 100)) + "%";
+    bar.setAttribute("data-tip", String(v));
+    c.appendChild(bar);
   });
 }
 
-/* ---- Live Pulse ---- */
+/* ---- Pulse dot ---- */
 
 function setPulse(ok) {
-  var dot = document.getElementById("livePulse");
-  if (!dot) return;
-  if (ok) {
-    dot.classList.remove("inactive");
-  } else {
-    dot.classList.add("inactive");
-  }
+  var d = el("livePulse");
+  if (!d) return;
+  d.className = "pulse-dot" + (ok ? "" : " inactive");
+  var s = el("chainStatus");
+  if (s) s.textContent = ok ? "Chain live" : "Unreachable";
 }
 
-/* ---- Global Search ---- */
+/* ---- Global search ---- */
 
-function initGlobalSearch() {
-  var input = document.getElementById("globalSearch");
-  var results = document.getElementById("searchResults");
+function initSearch() {
+  var input   = el("globalSearch");
+  var results = el("searchResults");
   if (!input || !results) return;
   var debounce = null;
 
   input.addEventListener("input", function () {
     clearTimeout(debounce);
     var q = input.value.trim();
-    if (!q) {
-      results.classList.remove("open");
-      return;
-    }
-    debounce = setTimeout(function () { doSearch(q, results); }, 250);
+    if (!q) { results.classList.remove("open"); return; }
+    debounce = setTimeout(function () { doSearch(q, results); }, 220);
   });
 
   input.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") {
-      results.classList.remove("open");
-      input.blur();
-    }
+    if (e.key === "Escape") { results.classList.remove("open"); input.blur(); }
     if (e.key === "Enter") {
       var first = results.querySelector(".search-result-item");
       if (first) first.click();
@@ -245,9 +219,7 @@ function initGlobalSearch() {
   });
 
   document.addEventListener("click", function (e) {
-    if (!e.target.closest(".search-wrapper")) {
-      results.classList.remove("open");
-    }
+    if (!e.target.closest(".search-wrapper")) results.classList.remove("open");
   });
 }
 
@@ -256,24 +228,12 @@ function doSearch(q, resultsEl) {
   var items = [];
 
   if (/^\d+$/.test(q)) {
-    items.push({
-      label: "Block",
-      text: "Height " + q,
-      href: "block.html?height=" + encodeURIComponent(q)
-    });
+    items.push({ label: "Block", text: "Height " + q, href: "block.html?height=" + encodeURIComponent(q) });
   }
 
   if (/^(0x)?[a-fA-F0-9]{8,}$/.test(q)) {
-    items.push({
-      label: "Block",
-      text: "Hash " + truncateHash(q),
-      href: "block.html?hash=" + encodeURIComponent(q)
-    });
-    items.push({
-      label: "Account",
-      text: truncateHash(q),
-      href: "accounts.html?id=" + encodeURIComponent(q)
-    });
+    items.push({ label: "Block",   text: shortHash(q), href: "block.html?hash="    + encodeURIComponent(q) });
+    items.push({ label: "Account", text: shortHash(q), href: "accounts.html?id=" + encodeURIComponent(q) });
   }
 
   if (items.length === 0) {
@@ -285,213 +245,192 @@ function doSearch(q, resultsEl) {
   items.forEach(function (item) {
     var div = document.createElement("div");
     div.className = "search-result-item";
-    div.innerHTML = '<span class="sr-label">' + item.label + '</span>' + item.text;
-    div.addEventListener("click", function () {
-      window.location.href = item.href;
-    });
+    div.innerHTML = '<span class="sr-label">' + item.label + "</span>" + item.text;
+    div.addEventListener("click", function () { window.location.href = item.href; });
     resultsEl.appendChild(div);
   });
   resultsEl.classList.add("open");
 }
 
-/* ---- Validators Renderer ---- */
+/* ---- Sidebar status ticker ---- */
 
-function renderValidatorRows(tbody, validators) {
-  if (!tbody) return;
-  tbody.innerHTML = "";
-  var list = validators || [];
-  if (list.length === 0) {
-    var tr = document.createElement("tr");
-    tr.innerHTML = '<td colspan="6" class="empty">No validators</td>';
-    tbody.appendChild(tr);
-    return;
-  }
-  list.forEach(function (v) {
-    var tr = document.createElement("tr");
-    var idText = v.validator_id || "";
-    var accountText = v.account_id || "";
-    var stakeText = v.stake_amount != null ? formatNumber(v.stake_amount) : "-";
-    var jailedText = v.jailed === true ? '<span class="badge badge-danger">jailed</span>' : '<span class="badge badge-muted">no</span>';
-    if (v.jailed == null) jailedText = "-";
-    tr.innerHTML =
-      '<td data-tip="' + idText + '">' + truncateHash(idText) + "</td>" +
-      "<td>" + (v.voting_power || "") + "</td>" +
-      "<td>" + stakeText + "</td>" +
-      '<td data-tip="' + accountText + '">' + truncateHash(accountText) + "</td>" +
-      "<td>" + jailedText + "</td>" +
-      "<td>" + statusBadge(v.active) + "</td>";
-    tbody.appendChild(tr);
-  });
-}
-
-/* ---- Overview ---- */
-
-function initOverview() {
-  var lastHeight = null;
-  var txHistory = [];
-  var blockTimeHistory = [];
-  var firstLoad = true;
-
-  fetchJSON("/blocks?limit=21").then(function (blocks) {
-    if (blocks && blocks.length > 0) {
-      blocks.reverse();
-      blocks.forEach(function (b) {
-        txHistory.push(b.transaction_count || 0);
-      });
-      if (txHistory.length > 20) txHistory = txHistory.slice(txHistory.length - 20);
-      renderSparkline("sparkTx", txHistory, Math.max(5, Math.max.apply(null, txHistory)));
-
-      for (var k = 1; k < blocks.length; k++) {
-        var hDiff = blocks[k].height - blocks[k - 1].height;
-        blockTimeHistory.push(hDiff > 0 ? 1 : 0);
-      }
-      if (blockTimeHistory.length > 20) blockTimeHistory = blockTimeHistory.slice(blockTimeHistory.length - 20);
-      renderSparkline("sparkTime", blockTimeHistory, Math.max(3, Math.max.apply(null, blockTimeHistory)));
-    }
-  }).catch(function () {});
-
+function initSidebarStatus() {
   function refresh() {
     fetchJSON("/status").then(function (s) {
-      set("genesisHash", s.genesis_hash || "-");
-      set("height", formatNumber(s.height));
-      set("validatorCount", String(s.validator_count));
-      set("syncing", s.syncing ? "Yes" : "No");
-      set("protocolVersion", String(s.protocol_version != null ? s.protocol_version : "-"));
+      setText("sidebarHeight", "h " + fmt(s.height));
+      setPulse(true);
+    }).catch(function () { setPulse(false); });
+  }
+  refresh();
+  setInterval(refresh, 5000);
+}
 
-      set("latestHash", s.latest_block_hash || "-");
-      var hashEl = document.getElementById("latestHash");
-      if (hashEl) hashEl.setAttribute("data-tip", s.latest_block_hash || "");
+/* =========================================================
+   PAGE: Overview (index.html)
+   ========================================================= */
 
-      var isNewBlock = lastHeight !== null && s.height > lastHeight && !firstLoad;
+function initOverview() {
+  var lastHeight   = null;
+  var txHistory    = [];
+  var firstLoad    = true;
+
+  function refreshStatus() {
+    fetchJSON("/status").then(function (s) {
+      setText("ovHeight",    fmt(s.height));
+      setText("ovValidators", fmt(s.validator_count));
+      setText("ovSyncing",   s.syncing ? "Yes" : "No");
+      var _proto = s.protocol_version;
+      setText("ovProtocol", _proto === 1 ? "Transfer" : _proto === 2 ? "Staking" : _proto != null ? "v" + _proto : "-");
+
+      var hashEl = el("ovLatestHash");
+      if (hashEl) {
+        hashEl.textContent = shortHash(s.latest_block_hash || "");
+        hashEl.setAttribute("data-tip", s.latest_block_hash || "");
+      }
+
+      var isNew = lastHeight !== null && s.height > lastHeight && !firstLoad;
 
       if (s.height > 0) {
         fetchJSON("/blocks/" + s.height).then(function (blk) {
-          set("latestStateHash", blk.state_hash || "-");
-          set("latestProposer", blk.proposer_id || "-");
-          set("latestTxCount", String(blk.transaction_count || 0));
+          setText("ovStateHash",  shortHash(blk.state_hash || ""));
+          setText("ovProposer",   shortHash(blk.proposer_id || ""));
+          setText("ovTxCount",    fmt(blk.transaction_count || 0));
+          setText("ovTimestamp",  timeAgo(blk.timestamp));
 
-          var stateEl = document.getElementById("latestStateHash");
-          if (stateEl) stateEl.setAttribute("data-tip", blk.state_hash || "");
-          var propEl = document.getElementById("latestProposer");
-          if (propEl) propEl.setAttribute("data-tip", blk.proposer_id || "");
+          var shEl = el("ovStateHash");
+          if (shEl) shEl.setAttribute("data-tip", blk.state_hash || "");
 
-          if (isNewBlock) {
-            showToast("New Block", "Block #" + formatNumber(s.height) + " produced");
+          if (isNew) {
+            toast("New Block", "Block #" + fmt(s.height) + " committed");
             txHistory.push(blk.transaction_count || 0);
             if (txHistory.length > 20) txHistory.shift();
+            renderSparkline("sparkTx", txHistory);
+            refreshBlocks();
           }
-
-          renderSparkline("sparkTx", txHistory, 5);
         }).catch(function () {});
-      } else {
-        set("latestStateHash", "-");
-        set("latestProposer", "-");
-        set("latestTxCount", "0");
       }
 
-      if (s.height !== lastHeight) {
-        if (lastHeight !== null) {
-          var produced = s.height - lastHeight;
-          blockTimeHistory.push(produced);
-          if (blockTimeHistory.length > 20) blockTimeHistory.shift();
-        }
-      }
       lastHeight = s.height;
-      firstLoad = false;
-
-      renderSparkline("sparkTime", blockTimeHistory, Math.max(5, Math.max.apply(null, blockTimeHistory) || 1));
-
+      firstLoad  = false;
       setPulse(true);
-
-    }).catch(function () {
-      setPulse(false);
-    });
+    }).catch(function () { setPulse(false); });
 
     fetchJSON("/consensus").then(function (c) {
-      var txt = "h" + (c.next_height != null ? c.next_height : "-");
-      if (c.lock && c.lock.height != null) {
-        txt += " r" + c.lock.round;
-        if (c.lock.block_hash) {
-          txt += " lock " + truncateHash(c.lock.block_hash);
-        } else {
-          txt += " lock -";
-        }
-      }
-      set("consensusInfo", txt);
+      var h = c.next_height != null ? fmt(c.next_height) : "-";
+      var r = c.lock && c.lock.round != null ? c.lock.round : "-";
+      setText("ovConsensus", "Next: " + h + " · Round " + r);
     }).catch(function () {});
   }
-  refresh();
-  setInterval(refresh, 3000);
 
-  fetch("/health/live").then(function (r) {
-    setHealth("healthLive", r.ok);
-  }).catch(function () { setHealth("healthLive", false); });
+  function refreshBlocks() {
+    fetchJSON("/blocks?limit=10").then(function (blocks) {
+      var tbody = el("recentBlocksTable");
+      if (!tbody) return;
+      if (!blocks || !blocks.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="table-empty">No blocks yet</td></tr>';
+        return;
+      }
+      tbody.innerHTML = "";
+      txHistory = [];
+      blocks.forEach(function (b) {
+        txHistory.push(b.transaction_count || 0);
+        var tr = document.createElement("tr");
+        tr.className = "clickable";
+        tr.innerHTML =
+          "<td>" + fmt(b.height) + "</td>" +
+          '<td data-tip="' + (b.hash || "") + '">' + shortHash(b.hash) + "</td>" +
+          '<td data-tip="' + (b.proposer_id || "") + '">' + shortHash(b.proposer_id) + "</td>" +
+          "<td>" + (b.transaction_count || 0) + "</td>" +
+          '<td class="text-muted">' + timeAgo(b.timestamp) + "</td>";
+        tr.addEventListener("click", function () {
+          window.location.href = "block.html?height=" + encodeURIComponent(b.height);
+        });
+        tbody.appendChild(tr);
+      });
+      renderSparkline("sparkTx", txHistory);
+    }).catch(function () {});
+  }
 
-  fetch("/health/ready").then(function (r) {
-    setHealth("healthReady", r.ok);
-  }).catch(function () { setHealth("healthReady", false); });
+  function refreshPeers() {
+    fetchJSON("/network/peers").then(function (peers) {
+      var tbody = el("peersTable");
+      if (!tbody) return;
+      var list = peers || [];
+      if (!list.length) {
+        tbody.innerHTML = '<tr><td colspan="2" class="table-empty">No peers connected</td></tr>';
+        return;
+      }
+      tbody.innerHTML = "";
+      list.forEach(function (p) {
+        var tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" + (p.address || "") + "</td>" +
+          '<td class="text-muted">' + timeAgo(p.connected_since) + "</td>";
+        tbody.appendChild(tr);
+      });
+    }).catch(function () {});
+  }
 
-  fetchJSON("/network/peers").then(function (peers) {
-    var tbody = document.getElementById("peersTable");
-    if (!tbody) return;
-    tbody.innerHTML = "";
-    var list = peers || [];
-    if (list.length === 0) {
-      var tr = document.createElement("tr");
-      tr.innerHTML = '<td colspan="2" class="empty">No peers connected</td>';
-      tbody.appendChild(tr);
-      return;
-    }
-    list.forEach(function (p) {
-      var tr = document.createElement("tr");
-      tr.innerHTML =
-        "<td>" + (p.address || "") + "</td>" +
-        '<td class="time-relative">' + timeAgo(p.connected_since) + "</td>";
-      tbody.appendChild(tr);
-    });
-  }).catch(function () {});
+  function refreshHealth() {
+    fetch("/health/live").then(function (r) { setHealthDot("healthLiveDot", r.ok); setHealthLabel("healthLiveLabel", r.ok ? "Live" : "Down"); }).catch(function () { setHealthDot("healthLiveDot", false); setHealthLabel("healthLiveLabel", "Down"); });
+    fetch("/health/ready").then(function (r) { setHealthDot("healthReadyDot", r.ok); setHealthLabel("healthReadyLabel", r.ok ? "Ready" : "Not ready"); }).catch(function () { setHealthDot("healthReadyDot", false); setHealthLabel("healthReadyLabel", "Not ready"); });
+  }
 
-  fetchJSON("/validators").then(function (validators) {
-    renderValidatorRows(document.getElementById("validatorsTable"), validators);
-  }).catch(function () {});
+  function setHealthDot(id, ok) {
+    var d = el(id);
+    if (d) d.className = "health-dot " + (ok ? "ok" : "err");
+  }
+
+  function setHealthLabel(id, text) {
+    var lbl = el(id);
+    if (lbl) lbl.textContent = text;
+  }
+
+  refreshStatus();
+  refreshBlocks();
+  refreshPeers();
+  refreshHealth();
+
+  setInterval(refreshStatus, 4000);
+  setInterval(refreshBlocks, 10000);
+  setInterval(refreshPeers, 15000);
 }
 
-/* ---- Blocks List ---- */
+/* =========================================================
+   PAGE: Blocks list (blocks.html)
+   ========================================================= */
 
 function initBlocks() {
-  var errorEl = document.getElementById("blocksError");
-  var tableEl = document.getElementById("blocksTable");
-  var limitEl = document.getElementById("limitInput");
-  var cursorEl = document.getElementById("cursorInput");
-  var loadBtn = document.getElementById("loadBtn");
+  var limitEl  = el("limitInput");
+  var cursorEl = el("cursorInput");
+  var loadBtn  = el("loadBtn");
+  var tableEl  = el("blocksTable");
+  var errorEl  = el("blocksError");
 
   function load() {
     errorEl.textContent = "";
     tableEl.innerHTML = "";
-    var limit = limitEl.value || "50";
-    var cursor = cursorEl.value || "";
+    var limit  = (limitEl  && limitEl.value)  ? limitEl.value  : "50";
+    var cursor = (cursorEl && cursorEl.value) ? cursorEl.value : "";
     var qs = new URLSearchParams();
     qs.set("limit", limit);
     if (cursor) qs.set("cursor", cursor);
 
     fetchJSON("/blocks?" + qs.toString()).then(function (blocks) {
-      if (!blocks || blocks.length === 0) {
-        tableEl.innerHTML = '<tr><td colspan="6" class="empty">No blocks found</td></tr>';
+      if (!blocks || !blocks.length) {
+        tableEl.innerHTML = '<tr><td colspan="6" class="table-empty">No blocks found</td></tr>';
         return;
       }
       blocks.forEach(function (b) {
         var tr = document.createElement("tr");
         tr.className = "clickable";
-        var hashText = b.hash || "";
-        var stateText = b.state_hash || "";
-        var proposer = b.proposer_id || "";
         tr.innerHTML =
-          "<td>" + formatNumber(b.height) + "</td>" +
-          '<td class="truncate" data-tip="' + hashText + '">' + truncateHash(hashText) + "</td>" +
-          '<td class="truncate" data-tip="' + proposer + '">' + truncateHash(proposer) + "</td>" +
+          "<td>" + fmt(b.height) + "</td>" +
+          '<td data-tip="' + (b.hash || "") + '">' + shortHash(b.hash) + "</td>" +
+          '<td data-tip="' + (b.proposer_id || "") + '">' + shortHash(b.proposer_id) + "</td>" +
           "<td>" + (b.transaction_count != null ? b.transaction_count : "0") + "</td>" +
-          '<td class="time-relative">' + timeAgo(b.timestamp) + "</td>" +
-          '<td class="truncate" data-tip="' + stateText + '">' + truncateHash(stateText) + "</td>";
+          '<td class="text-muted">' + timeAgo(b.timestamp) + "</td>" +
+          '<td data-tip="' + (b.state_hash || "") + '">' + shortHash(b.state_hash) + "</td>";
         tr.addEventListener("click", function () {
           window.location.href = "block.html?height=" + encodeURIComponent(b.height);
         });
@@ -502,195 +441,460 @@ function initBlocks() {
     });
   }
 
-  loadBtn.addEventListener("click", load);
+  if (loadBtn) loadBtn.addEventListener("click", load);
   load();
 }
 
-/* ---- Block Detail ---- */
+/* =========================================================
+   PAGE: Block detail (block.html)
+   ========================================================= */
 
 function initBlockDetail() {
-  var errorEl = document.getElementById("blockError");
-  var q = getQuery();
+  var q      = getQuery();
   var height = q.get("height");
-  var hash = q.get("hash");
-  var path = "";
+  var hash   = q.get("hash");
+  var path   = "";
+  var errorEl = el("blockError");
 
   if (height != null && height !== "") {
     path = "/blocks/" + encodeURIComponent(height);
   } else if (hash) {
     path = "/blocks/by-hash/" + encodeURIComponent(hash);
   } else {
-    errorEl.textContent = "No block specified.";
+    if (errorEl) errorEl.textContent = "No block specified.";
     return;
   }
 
   fetchJSON(path).then(function (b) {
     var h = b.height != null ? b.height : 0;
 
-    set("blkHeight", formatNumber(h));
-    set("blkEpoch", String(b.epoch != null ? b.epoch : ""));
-    set("blkHash", b.hash || "");
-    set("parentHash", b.parent_hash || "");
-    set("blkProposer", b.proposer_id || "");
-    set("stateHash", b.state_hash || "");
-    set("blkTimestamp", b.timestamp ? timeAgo(b.timestamp) + " \u00b7 " + new Date(b.timestamp).toLocaleString() : "-");
+    setText("blkHeight",    fmt(h));
+    setText("blkEpoch",     b.epoch != null ? String(b.epoch) : "0");
+    setText("blkTimestamp", fmtTimestamp(b.timestamp));
+    setText("blkTxCount",   fmt(b.transaction_count || 0));
 
-    var blkHashEl = document.getElementById("blkHash");
-    if (blkHashEl) blkHashEl.setAttribute("data-tip", b.hash || "");
-    var parentEl = document.getElementById("parentHash");
-    if (parentEl) parentEl.setAttribute("data-tip", b.parent_hash || "");
-    var proposerEl = document.getElementById("blkProposer");
-    if (proposerEl) proposerEl.setAttribute("data-tip", b.proposer_id || "");
-    var stateEl = document.getElementById("stateHash");
-    if (stateEl) stateEl.setAttribute("data-tip", b.state_hash || "");
+    var fields = {
+      blkHash:    b.hash,
+      parentHash: b.parent_hash,
+      blkProposer:b.proposer_id,
+      stateHash:  b.state_hash
+    };
 
-    var copyLink = document.getElementById("copyHash");
-    if (copyLink) {
-      copyLink.addEventListener("click", function (e) {
+    Object.keys(fields).forEach(function (id) {
+      var node = el(id);
+      if (!node) return;
+      node.textContent = shortHash(fields[id] || "");
+      node.setAttribute("data-tip", fields[id] || "");
+    });
+
+    var copyBtn = el("copyHash");
+    if (copyBtn) {
+      copyBtn.addEventListener("click", function (e) {
         e.preventDefault();
-        copyWithFeedback(b.hash || "", copyLink);
+        copyWithFeedback(b.hash || "", copyBtn);
       });
     }
 
-    var prevLink = document.getElementById("prevBlock");
-    var nextLink = document.getElementById("nextBlock");
+    var prevLink = el("prevBlock");
+    var nextLink = el("nextBlock");
     if (prevLink) {
-      if (h > 0) {
-        prevLink.href = "block.html?height=" + (h - 1);
-        prevLink.innerHTML = "&larr; Previous <span class='kbd-hint'>&larr;</span>";
-      } else {
-        prevLink.classList.add("disabled");
-      }
+      if (h > 0) { prevLink.href = "block.html?height=" + (h - 1); }
+      else        { prevLink.classList.add("disabled"); }
     }
     if (nextLink) {
       nextLink.href = "block.html?height=" + (h + 1);
-      nextLink.innerHTML = "Next &rarr; <span class='kbd-hint'>&rarr;</span>";
     }
 
     document.addEventListener("keydown", function (e) {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
-      if (e.key === "ArrowLeft" && prevLink && !prevLink.classList.contains("disabled")) {
-        window.location.href = prevLink.href;
-      }
-      if (e.key === "ArrowRight" && nextLink) {
-        window.location.href = nextLink.href;
-      }
+      if (e.key === "ArrowLeft"  && prevLink && !prevLink.classList.contains("disabled")) window.location.href = prevLink.href;
+      if (e.key === "ArrowRight" && nextLink) window.location.href = nextLink.href;
     });
 
-    var txTable = document.getElementById("txTable");
-    var txEmpty = document.getElementById("txEmpty");
-    var txCount = document.getElementById("txCount");
+    var txTable  = el("txTable");
+    var txEmpty  = el("txEmpty");
     var txs = b.transactions || [];
 
-    if (txCount) txCount.textContent = txs.length;
-
-    if (txs.length === 0) {
+    if (!txs.length) {
       if (txEmpty) txEmpty.style.display = "block";
     } else {
       if (txEmpty) txEmpty.style.display = "none";
       txs.forEach(function (tx, i) {
         var tr = document.createElement("tr");
-        var sender = tx.sender || "";
-        var recipient = tx.recipient || "";
         tr.innerHTML =
           "<td>" + (i + 1) + "</td>" +
-          '<td class="truncate" data-tip="' + sender + '">' + truncateHash(sender) + "</td>" +
-          '<td class="truncate" data-tip="' + recipient + '">' + truncateHash(recipient) + "</td>" +
-          "<td>" + formatNumber(tx.amount) + ' <span class="unit">AXM</span></td>' +
+          '<td data-tip="' + (tx.sender || "") + '">' + shortHash(tx.sender) + "</td>" +
+          '<td data-tip="' + (tx.recipient || "") + '">' + shortHash(tx.recipient) + "</td>" +
+          "<td>" + fmt(tx.amount) + ' <span class="unit">AXM</span></td>' +
           "<td>" + (tx.nonce != null ? tx.nonce : "") + "</td>";
         txTable.appendChild(tr);
       });
     }
 
-    var sigTable = document.getElementById("sigTable");
+    var sigTable = el("sigTable");
     var sigs = b.signatures || [];
-    if (sigs.length === 0) {
-      sigTable.innerHTML = '<tr><td colspan="2" class="empty">No signature data</td></tr>';
+    if (!sigs.length) {
+      sigTable.innerHTML = '<tr><td colspan="2" class="table-empty">No signatures</td></tr>';
     } else {
       sigs.forEach(function (sig) {
         var tr = document.createElement("tr");
-        var valText = sig.validator_id || "";
-        var sigText = sig.signature || "";
         tr.innerHTML =
-          '<td class="truncate" data-tip="' + valText + '">' + truncateHash(valText) + "</td>" +
-          '<td class="truncate" data-tip="' + sigText + '">' + truncateHash(sigText) + "</td>";
+          '<td data-tip="' + (sig.validator_id || "") + '">' + shortHash(sig.validator_id) + "</td>" +
+          '<td data-tip="' + (sig.signature || "") + '">' + shortHash(sig.signature) + "</td>";
         sigTable.appendChild(tr);
       });
     }
-  }).catch(function (e) {
-    errorEl.textContent = e.message;
-  });
-}
-
-/* ---- Accounts ---- */
-
-function initAccounts() {
-  var input = document.getElementById("accountInput");
-  var btn = document.getElementById("lookupBtn");
-  var errorEl = document.getElementById("accountError");
-  var resultSection = document.getElementById("accountResult");
-
-  var q = getQuery();
-  var prefill = q.get("id");
-  if (prefill && input) {
-    input.value = prefill;
-    setTimeout(function () { lookup(); }, 100);
-  }
-
-  function lookup() {
-    errorEl.textContent = "";
-    if (resultSection) resultSection.style.display = "none";
-    var id = (input.value || "").trim();
-    if (!id) {
-      errorEl.textContent = "Enter an account ID";
-      return;
-    }
-    fetchJSON("/accounts/" + encodeURIComponent(id)).then(function (acc) {
-      set("accId", acc.account_id || id);
-      set("accBalance", formatNumber(acc.balance));
-      set("accNonce", String(acc.nonce != null ? acc.nonce : ""));
-      if (resultSection) resultSection.style.display = "block";
-    }).catch(function (e) {
-      errorEl.textContent = e.message;
-    });
-  }
-
-  btn.addEventListener("click", lookup);
-  input.addEventListener("keydown", function (e) {
-    if (e.key === "Enter") lookup();
-  });
-}
-
-/* ---- Validators ---- */
-
-function initValidators() {
-  var errorEl = document.getElementById("validatorsError");
-
-  fetchJSON("/validators").then(function (validators) {
-    var list = validators || [];
-    var active = list.filter(function (v) { return v.active; });
-    var hasStake = list.some(function (v) { return v.stake_amount != null; });
-    var totalPower = list.reduce(function (sum, v) {
-      return sum + (hasStake ? (v.stake_amount || 0) : (v.voting_power || 0));
-    }, 0);
-    var quorumThreshold = Math.floor(totalPower * 2 / 3);
-    var quorumMin = quorumThreshold + 1;
-
-    set("valCount", String(list.length));
-    set("valActive", String(active.length));
-    set("valTotalPower", String(totalPower));
-    set("valQuorum", ">" + quorumThreshold + " (" + quorumMin + "+)");
-
-    renderValidatorRows(document.getElementById("validatorsFullTable"), list);
   }).catch(function (e) {
     if (errorEl) errorEl.textContent = e.message;
   });
 }
 
-/* ---- Init ---- */
+/* =========================================================
+   PAGE: Accounts (accounts.html)
+   ========================================================= */
+
+function initAccounts() {
+  var input     = el("accountInput");
+  var btn       = el("lookupBtn");
+  var errorEl   = el("accountError");
+  var resultEl  = el("accountResult");
+
+  var prefill = getQuery().get("id");
+  if (prefill && input) {
+    input.value = prefill;
+    setTimeout(lookup, 80);
+  }
+
+  function lookup() {
+    if (errorEl) errorEl.textContent = "";
+    if (resultEl) resultEl.style.display = "none";
+    var id = (input ? input.value : "").trim();
+    if (!id) { if (errorEl) errorEl.textContent = "Enter an account ID."; return; }
+
+    fetchJSON("/accounts/" + encodeURIComponent(id)).then(function (acc) {
+      var idNode = el("accId");
+      if (idNode) {
+        idNode.textContent = acc.account_id || id;
+        idNode.setAttribute("data-tip", acc.account_id || id);
+      }
+      setText("accBalance", fmt(acc.balance));
+      setText("accNonce",   acc.nonce != null ? String(acc.nonce) : "0");
+      if (resultEl) resultEl.style.display = "";
+    }).catch(function (e) {
+      if (errorEl) errorEl.textContent = e.message;
+    });
+  }
+
+  if (btn)   btn.addEventListener("click", lookup);
+  if (input) input.addEventListener("keydown", function (e) { if (e.key === "Enter") lookup(); });
+}
+
+/* =========================================================
+   PAGE: Validators (validators.html)
+   ========================================================= */
+
+function initValidators() {
+  var errorEl = el("validatorsError");
+
+  fetchJSON("/validators").then(function (validators) {
+    var list    = validators || [];
+    var active  = list.filter(function (v) { return v.active; });
+    var hasSt   = list.some(function (v) { return v.stake_amount != null; });
+    var total   = list.reduce(function (s, v) {
+      return s + (hasSt ? (v.stake_amount || 0) : (v.voting_power || 0));
+    }, 0);
+    var quorumMin = Math.floor(total * 2 / 3) + 1;
+
+    setText("valCount",   fmt(list.length));
+    setText("valActive",  fmt(active.length));
+    setText("valTotal",   fmt(total));
+    setText("valQuorum",  fmt(quorumMin) + "+ required");
+
+    var tbody = el("validatorsTable");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="table-empty">No validators</td></tr>';
+      return;
+    }
+
+    list.forEach(function (v) {
+      var tr  = document.createElement("tr");
+      var vid = v.validator_id || "";
+      var aid = v.account_id  || "";
+      var jailed = v.jailed === true
+        ? '<span class="badge badge-red">Jailed</span>'
+        : '<span class="badge badge-muted">No</span>';
+
+      tr.innerHTML =
+        '<td data-tip="' + vid + '">' + shortHash(vid) + "</td>" +
+        "<td>" + fmt(v.voting_power) + "</td>" +
+        "<td>" + (v.stake_amount != null ? fmt(v.stake_amount) : "-") + "</td>" +
+        '<td data-tip="' + aid + '">' + shortHash(aid) + "</td>" +
+        "<td>" + jailed + "</td>" +
+        "<td>" + statusBadge(v.active) + "</td>";
+      tbody.appendChild(tr);
+    });
+  }).catch(function (e) {
+    if (errorEl) errorEl.textContent = e.message;
+  });
+}
+
+/* =========================================================
+   PAGE: Staking (staking.html)
+   ========================================================= */
+
+function initStaking() {
+  var errEl = el("stakingError");
+
+  fetchJSON("/staking").then(function (s) {
+    var enabled = s.enabled === true;
+    setText("stEnabled",   enabled ? "Active" : "Inactive (V1)");
+    setText("stEpoch",     fmt(s.epoch));
+    setText("stMinStake",  fmt(s.minimum_stake) + " AXM");
+    setText("stUnbonding", fmt(s.unbonding_period) + " blocks");
+    setText("stEvidence",  fmt(s.processed_evidence_count));
+
+    var notice = el("stakingNotice");
+    if (notice) notice.style.display = enabled ? "none" : "";
+
+    var stakesEl = el("stakesTable");
+    if (stakesEl) {
+      var list = s.stakes || [];
+      if (!list.length) {
+        stakesEl.innerHTML = '<tr><td colspan="2" class="table-empty">No active stakes</td></tr>';
+      } else {
+        stakesEl.innerHTML = "";
+        list.forEach(function (st) {
+          var tr = document.createElement("tr");
+          tr.innerHTML = '<td data-tip="' + (st.validator_id || "") + '">' + shortHash(st.validator_id) + "</td>" +
+                         "<td>" + fmt(st.amount) + " AXM</td>";
+          stakesEl.appendChild(tr);
+        });
+      }
+    }
+
+    var unbondEl = el("unbondingTable");
+    if (unbondEl) {
+      var queue = s.unbonding_queue || [];
+      if (!queue.length) {
+        unbondEl.innerHTML = '<tr><td colspan="3" class="table-empty">No unbonding entries</td></tr>';
+      } else {
+        unbondEl.innerHTML = "";
+        queue.forEach(function (u) {
+          var tr = document.createElement("tr");
+          tr.innerHTML = '<td data-tip="' + (u.validator_id || "") + '">' + shortHash(u.validator_id) + "</td>" +
+                         "<td>" + fmt(u.amount) + " AXM</td>" +
+                         "<td>" + fmt(u.release_height) + "</td>";
+          unbondEl.appendChild(tr);
+        });
+      }
+    }
+
+    var jailedEl = el("jailedTable");
+    if (jailedEl) {
+      var jailed = s.jailed_validators || [];
+      if (!jailed.length) {
+        jailedEl.innerHTML = '<tr><td class="table-empty">No jailed validators</td></tr>';
+      } else {
+        jailedEl.innerHTML = "";
+        jailed.forEach(function (vid) {
+          var tr = document.createElement("tr");
+          tr.innerHTML = '<td data-tip="' + vid + '">' + shortHash(vid) + ' <span class="badge badge-red">Jailed</span></td>';
+          jailedEl.appendChild(tr);
+        });
+      }
+    }
+  }).catch(function (e) {
+    if (errEl) errEl.textContent = e.message;
+  });
+}
+
+/* =========================================================
+   PAGE: Transactions (tx.html)
+   ========================================================= */
+
+function hexToBytes(hex) {
+  var out = new Uint8Array(hex.length / 2);
+  for (var i = 0; i < hex.length; i += 2) out[i >> 1] = parseInt(hex.slice(i, i + 2), 16);
+  return out;
+}
+
+function bytesToHex(bytes) {
+  var out = "";
+  for (var i = 0; i < bytes.length; i++) out += ("0" + bytes[i].toString(16)).slice(-2);
+  return out;
+}
+
+function _writeU32BE(n, buf) {
+  buf.push((n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff);
+}
+
+function _writeU64BE(n, buf) {
+  var lo = n % 0x100000000;
+  var hi = Math.floor(n / 0x100000000);
+  _writeU32BE(hi >>> 0, buf);
+  _writeU32BE(lo >>> 0, buf);
+}
+
+function _writeStr(s, buf) {
+  _writeU32BE(s.length, buf);
+  for (var i = 0; i < s.length; i++) buf.push(s.charCodeAt(i));
+}
+
+function serializeTxV1(sender, recipient, amount, nonce) {
+  var buf = [];
+  _writeStr(sender, buf);
+  _writeStr(recipient, buf);
+  _writeU64BE(amount, buf);
+  _writeU64BE(nonce, buf);
+  return new Uint8Array(buf);
+}
+
+function serializeTxV2(txType, sender, recipient, amount, nonce) {
+  var buf = [];
+  buf.push(txType & 0xff);
+  _writeStr(sender, buf);
+  _writeStr(recipient, buf);
+  _writeU64BE(amount, buf);
+  _writeU64BE(nonce, buf);
+  return new Uint8Array(buf);
+}
+
+function initTransactions() {
+  var privKeyEl = el("txPrivKey");
+  var senderEl  = el("txSender");
+  var typeEl    = el("txType");
+  var recipEl   = el("txRecipient");
+  var recipHint = el("txRecipientHint");
+  var amountEl  = el("txAmount");
+  var nonceEl   = el("txNonce");
+  var submitBtn = el("txSubmit");
+  var errEl     = el("txError");
+  var resultEl  = el("txResult");
+  var txHashOut = el("txHashOut");
+
+  var txTypeHints = {
+    Transfer: "Recipient account to receive the funds.",
+    Stake:    "Validator account ID to stake with.",
+    Unstake:  "Validator account ID to unstake from."
+  };
+
+  if (typeEl) typeEl.addEventListener("change", function () {
+    if (recipHint) recipHint.textContent = txTypeHints[typeEl.value] || "";
+  });
+
+  function deriveAndFillSender() {
+    var hex = privKeyEl ? privKeyEl.value.trim().replace(/^0x/i, "") : "";
+    if (hex.length !== 64 || !/^[0-9a-fA-F]+$/.test(hex)) {
+      if (senderEl) senderEl.value = "";
+      return;
+    }
+    try {
+      var kp = nacl.sign.keyPair.fromSeed(hexToBytes(hex));
+      var pub = bytesToHex(kp.publicKey);
+      if (senderEl) senderEl.value = pub;
+      fetchJSON("/accounts/" + pub).then(function (acc) {
+        if (nonceEl && acc.nonce != null) nonceEl.value = acc.nonce;
+      }).catch(function () {});
+    } catch (_) {
+      if (senderEl) senderEl.value = "";
+    }
+  }
+
+  if (privKeyEl) privKeyEl.addEventListener("input", deriveAndFillSender);
+
+  if (submitBtn) submitBtn.addEventListener("click", function () {
+    if (errEl)    errEl.textContent = "";
+    if (resultEl) resultEl.style.display = "none";
+
+    var privHex   = privKeyEl ? privKeyEl.value.trim().replace(/^0x/i, "") : "";
+    var sender    = senderEl  ? senderEl.value.trim() : "";
+    var txTypeTxt = typeEl    ? typeEl.value : "Transfer";
+    var recipient = recipEl   ? recipEl.value.trim().replace(/^0x/i, "") : "";
+    var amount    = parseInt(amountEl ? amountEl.value : "0", 10) || 0;
+    var nonce     = parseInt(nonceEl  ? nonceEl.value  : "0", 10) || 0;
+
+    var txTypeNum = { Transfer: 0, Stake: 1, Unstake: 2 }[txTypeTxt];
+    if (txTypeNum === undefined) txTypeNum = 0;
+
+    if (!privHex || privHex.length !== 64) {
+      if (errEl) errEl.textContent = "Enter a valid 32-byte (64 hex char) private key.";
+      return;
+    }
+    if (!recipient || !/^[0-9a-fA-F]{64}$/.test(recipient)) {
+      if (errEl) errEl.textContent = "Recipient must be a 64-char hex account ID.";
+      return;
+    }
+    if (amount <= 0) {
+      if (errEl) errEl.textContent = "Amount must be greater than 0.";
+      return;
+    }
+
+    submitBtn.disabled    = true;
+    submitBtn.textContent = "Signing…";
+
+    fetchJSON("/status").then(function (s) {
+      var height = s.height || 0;
+      var v2     = height >= 10000;
+
+      var kp  = nacl.sign.keyPair.fromSeed(hexToBytes(privHex));
+      var msg = v2 ? serializeTxV2(txTypeNum, sender, recipient, amount, nonce)
+                   : serializeTxV1(sender, recipient, amount, nonce);
+      var sig = nacl.sign.detached(msg, kp.secretKey);
+
+      var body = {
+        sender:    sender,
+        recipient: recipient,
+        amount:    amount,
+        nonce:     nonce,
+        signature: bytesToHex(sig),
+        tx_type:   txTypeTxt
+      };
+
+      var token   = localStorage.getItem("axiom_token");
+      var headers = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = "Bearer " + token;
+
+      return fetch(API_BASE + "/transactions", {
+        method:  "POST",
+        headers: headers,
+        body:    JSON.stringify(body)
+      }).then(function (res) {
+        return res.json().then(function (data) { return { ok: res.ok, data: data }; });
+      });
+    }).then(function (r) {
+      submitBtn.disabled    = false;
+      submitBtn.textContent = "Sign & Submit";
+      if (r.ok) {
+        if (txHashOut) txHashOut.textContent = r.data.tx_hash || "";
+        if (resultEl)  resultEl.style.display = "";
+        if (nonceEl)   nonceEl.value = (parseInt(nonceEl.value || "0", 10) + 1);
+        toast("Transaction Submitted", shortHash(r.data.tx_hash || ""));
+      } else {
+        if (errEl) errEl.textContent = r.data.error || "Submission failed.";
+      }
+    }).catch(function (e) {
+      submitBtn.disabled    = false;
+      submitBtn.textContent = "Sign & Submit";
+      if (errEl) errEl.textContent = e.message || "Network error.";
+    });
+  });
+
+  var copyHashBtn = el("copyTxHash");
+  if (copyHashBtn) copyHashBtn.addEventListener("click", function () {
+    copyWithFeedback(txHashOut ? txHashOut.textContent : "", copyHashBtn);
+  });
+}
+
+/* =========================================================
+   Bootstrap
+   ========================================================= */
 
 initTooltip();
-initGlobalSearch();
+initSearch();
+initSidebarStatus();
 
 var loc = window.location.pathname;
 if (loc.endsWith("/") || loc.endsWith("index.html")) {
@@ -703,4 +907,8 @@ if (loc.endsWith("/") || loc.endsWith("index.html")) {
   initAccounts();
 } else if (loc.endsWith("validators.html")) {
   initValidators();
+} else if (loc.endsWith("staking.html")) {
+  initStaking();
+} else if (loc.endsWith("tx.html")) {
+  initTransactions();
 }

@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AXIOM &bull; Transactions</title>
+  <link rel="stylesheet" href="styles.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js"></script>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+          <path d="M10 2L3 6.5v7L10 18l7-4.5v-7L10 2zm0 2.24L15.2 7.5v5L10 15.76 4.8 12.5v-5L10 4.24z"/>
+        </svg>
+      </div>
+      <div class="sidebar-wordmark">AXIOM<span>Operator Console</span></div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Navigation</div>
+      <ul class="sidebar-nav">
+        <li><a href="index.html"><i class="fa-solid fa-gauge-high"></i> Overview</a></li>
+        <li><a href="blocks.html"><i class="fa-solid fa-cube"></i> Blocks</a></li>
+        <li><a href="accounts.html"><i class="fa-solid fa-wallet"></i> Accounts</a></li>
+        <li><a href="validators.html"><i class="fa-solid fa-shield-halved"></i> Validators</a></li>
+        <li><a href="staking.html"><i class="fa-solid fa-coins"></i> Staking</a></li>
+        <li><a href="tx.html" class="active"><i class="fa-solid fa-paper-plane"></i> Transactions</a></li>
+      </ul>
+    </div>
+    <div class="sidebar-bottom">
+      <div class="sidebar-status">
+        <span class="pulse-dot" id="livePulse"></span>
+        <span class="sidebar-status-text" id="chainStatus">Connecting...</span>
+        <span class="sidebar-status-text" id="sidebarHeight" style="text-align:right;flex-shrink:0;"></span>
+      </div>
+      <button class="sidebar-logout" onclick="logout()"><i class="fa-solid fa-arrow-right-from-bracket"></i> Sign out</button>
+    </div>
+  </aside>
+
+  <div class="mobile-topbar">
+    <div class="sidebar-wordmark">AXIOM <span style="display:inline;font-size:9px;color:var(--text-3);">CONSOLE</span></div>
+    <button class="btn btn-ghost" style="font-size:12px;padding:5px 10px;" onclick="logout()">Sign out</button>
+  </div>
+
+  <div class="main">
+    <nav class="mobile-nav">
+      <a href="index.html"><i class="fa-solid fa-gauge-high"></i> Overview</a>
+      <a href="blocks.html"><i class="fa-solid fa-cube"></i> Blocks</a>
+      <a href="accounts.html"><i class="fa-solid fa-wallet"></i> Accounts</a>
+      <a href="validators.html"><i class="fa-solid fa-shield-halved"></i> Validators</a>
+      <a href="staking.html"><i class="fa-solid fa-coins"></i> Staking</a>
+      <a href="tx.html" class="active"><i class="fa-solid fa-paper-plane"></i> Transactions</a>
+    </nav>
+
+    <div class="page-header">
+      <div>
+        <div class="page-title">Submit Transaction</div>
+        <div class="page-subtitle">Sign and broadcast a transaction to the mempool</div>
+      </div>
+      <div class="search-wrapper">
+        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+        <input type="text" id="globalSearch" class="search-input" placeholder="Block height, hash, account..."/>
+        <div class="search-results" id="searchResults"></div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <div class="card" style="border-left:3px solid var(--accent);">
+        <div class="card-body" style="display:flex;align-items:flex-start;gap:10px;color:var(--text-2);font-size:13px;">
+          <i class="fa-solid fa-lock" style="color:var(--accent);margin-top:1px;"></i>
+          <span>Your private key is used locally to sign the transaction bytes. It is <strong>never sent to the server</strong> — only the signed transaction is submitted. Use this page on a trusted machine only.</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title"><i class="fa-solid fa-paper-plane"></i>&nbsp; Transaction Details</span>
+        </div>
+        <div class="card-body">
+
+          <div class="form-group">
+            <label class="form-label">Private Key <span style="color:var(--text-3);font-weight:400;">(32-byte hex, 64 chars)</span></label>
+            <input class="form-input" type="password" id="txPrivKey" placeholder="Enter your Ed25519 private key seed (hex)" autocomplete="off" spellcheck="false"/>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Sender <span style="color:var(--text-3);font-weight:400;">(derived from key)</span></label>
+            <input class="form-input" type="text" id="txSender" readonly placeholder="Auto-derived from private key" style="font-family:monospace;font-size:11px;color:var(--text-2);" spellcheck="false"/>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Type</label>
+            <select class="form-input" id="txType" style="cursor:pointer;">
+              <option value="Transfer">Transfer</option>
+              <option value="Stake">Stake &mdash; V2 only (height &ge; 10,000)</option>
+              <option value="Unstake">Unstake &mdash; V2 only (height &ge; 10,000)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Recipient</label>
+            <input class="form-input" type="text" id="txRecipient" placeholder="64-char hex account ID" autocomplete="off" spellcheck="false" style="font-family:monospace;font-size:11px;"/>
+            <div style="font-size:11px;color:var(--text-3);margin-top:4px;" id="txRecipientHint">Recipient account to receive the funds.</div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">Amount <span style="color:var(--text-3);font-weight:400;">(AXM)</span></label>
+              <input class="form-input" type="number" id="txAmount" placeholder="0" min="1" step="1"/>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">Nonce <span style="color:var(--text-3);font-weight:400;">(auto-fetched)</span></label>
+              <input class="form-input" type="number" id="txNonce" placeholder="0" min="0" step="1"/>
+            </div>
+          </div>
+
+          <div id="txError" class="error-msg" style="margin-top:16px;"></div>
+
+          <div style="margin-top:20px;">
+            <button class="btn btn-primary" id="txSubmit" style="width:100%;padding:11px;">
+              <i class="fa-solid fa-paper-plane"></i>&nbsp; Sign &amp; Submit
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="card" id="txResult" style="display:none;border-left:3px solid var(--green);">
+        <div class="card-header">
+          <span class="card-title" style="color:var(--green);"><i class="fa-solid fa-circle-check"></i>&nbsp; Transaction Accepted</span>
+        </div>
+        <div class="card-body">
+          <div class="detail-grid">
+            <div class="detail-item">
+              <label>TX Hash</label>
+              <span class="detail-value truncate" id="txHashOut" data-tip="" style="font-family:monospace;font-size:11px;"></span>
+            </div>
+          </div>
+          <div style="margin-top:14px;">
+            <button class="btn btn-ghost" id="copyTxHash" style="font-size:12px;padding:5px 12px;">
+              <i class="fa-solid fa-copy"></i> Copy hash
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="page-footer">AXIOM Console</div>
+  </div>
+</div>
+
+<div id="toastContainer" class="toast-container"></div>
+<div id="tooltip" class="tooltip"></div>
+<script src="app.js"></script>
+</body>
+</html>

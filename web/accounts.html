@@ -5,54 +5,119 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>AXIOM &bull; Accounts</title>
   <link rel="stylesheet" href="styles.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 </head>
-<body class="page-enter">
-  <header class="topbar">
-    <div class="brand">AXIOM <span class="pulse-dot" id="livePulse" title="Chain active"></span></div>
-    <nav class="nav">
-      <a href="index.html">Overview</a>
-      <a href="blocks.html">Blocks</a>
-      <a href="accounts.html" class="active">Accounts</a>
-      <a href="validators.html">Validators</a>
-    </nav>
-    <div class="search-wrapper">
-      <input type="text" id="globalSearch" class="search-input" placeholder="Search block height, hash, or account..." />
-      <div class="search-results" id="searchResults"></div>
+<body>
+<div class="shell">
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+          <path d="M10 2L3 6.5v7L10 18l7-4.5v-7L10 2zm0 2.24L15.2 7.5v5L10 15.76 4.8 12.5v-5L10 4.24z"/>
+        </svg>
+      </div>
+      <div class="sidebar-wordmark">AXIOM<span>Operator Console</span></div>
     </div>
-    <div class="meta"></div>
-    <button class="logout-btn" onclick="logout()">Logout</button>
-  </header>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Navigation</div>
+      <ul class="sidebar-nav">
+        <li><a href="index.html"><i class="fa-solid fa-gauge-high"></i> Overview</a></li>
+        <li><a href="blocks.html"><i class="fa-solid fa-cube"></i> Blocks</a></li>
+        <li><a href="accounts.html" class="active"><i class="fa-solid fa-wallet"></i> Accounts</a></li>
+        <li><a href="validators.html"><i class="fa-solid fa-shield-halved"></i> Validators</a></li>
+        <li><a href="staking.html"><i class="fa-solid fa-coins"></i> Staking</a></li>
+        <li><a href="tx.html"><i class="fa-solid fa-paper-plane"></i> Transactions</a></li>
+      </ul>
+    </div>
+    <div class="sidebar-bottom">
+      <div class="sidebar-status">
+        <span class="pulse-dot" id="livePulse"></span>
+        <span class="sidebar-status-text" id="chainStatus">Connecting...</span>
+        <span class="sidebar-status-text" id="sidebarHeight" style="text-align:right;flex-shrink:0;"></span>
+      </div>
+      <button class="sidebar-logout" onclick="logout()"><i class="fa-solid fa-arrow-right-from-bracket"></i> Sign out</button>
+    </div>
+  </aside>
 
-  <div id="toastContainer" class="toast-container"></div>
+  <div class="mobile-topbar">
+    <div class="sidebar-wordmark">AXIOM <span style="display:inline;font-size:9px;color:var(--text-3);">CONSOLE</span></div>
+    <button class="btn btn-ghost" style="font-size:12px;padding:5px 10px;" onclick="logout()">Sign out</button>
+  </div>
 
-  <main class="container">
-    <section class="section">
-      <h2 class="section-title">Account Lookup</h2>
-      <div class="grid">
-        <div>
-          <label>Account ID</label>
-          <input id="accountInput" type="text" placeholder="hex-encoded public key"/>
+  <div class="main">
+    <nav class="mobile-nav">
+      <a href="index.html"><i class="fa-solid fa-gauge-high"></i> Overview</a>
+      <a href="blocks.html"><i class="fa-solid fa-cube"></i> Blocks</a>
+      <a href="accounts.html" class="active"><i class="fa-solid fa-wallet"></i> Accounts</a>
+      <a href="validators.html"><i class="fa-solid fa-shield-halved"></i> Validators</a>
+      <a href="staking.html"><i class="fa-solid fa-coins"></i> Staking</a>
+      <a href="tx.html"><i class="fa-solid fa-paper-plane"></i> Transactions</a>
+    </nav>
+
+    <div class="page-header">
+      <div>
+        <div class="page-title">Accounts</div>
+        <div class="page-subtitle">Look up balance and nonce by account ID</div>
+      </div>
+      <div class="search-wrapper">
+        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+        <input type="text" id="globalSearch" class="search-input" placeholder="Block height, hash, account..."/>
+        <div class="search-results" id="searchResults"></div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- Lookup form -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title"><i class="fa-solid fa-magnifying-glass"></i>&nbsp; Account Lookup</span>
         </div>
-        <div>
-          <label>&nbsp;</label>
-          <button id="lookupBtn">Lookup</button>
+        <div class="card-body" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+          <div class="form-group" style="flex:1;min-width:240px;">
+            <label class="form-label">Account ID</label>
+            <input id="accountInput" class="form-input" type="text" placeholder="hex-encoded public key"/>
+          </div>
+          <button id="lookupBtn" class="btn btn-primary">
+            <i class="fa-solid fa-magnifying-glass"></i> Look up
+          </button>
+        </div>
+        <div id="accountError" class="error-msg" style="padding:0 18px 14px;"></div>
+      </div>
+
+      <!-- Result -->
+      <div class="card" id="accountResult" style="display:none;">
+        <div class="card-header">
+          <span class="card-title"><i class="fa-solid fa-wallet"></i>&nbsp; Account</span>
+        </div>
+        <div class="card-body">
+          <div class="detail-grid">
+            <div class="detail-item" style="grid-column:1/-1;">
+              <label>Account ID</label>
+              <span class="detail-value" id="accId" data-tip=""></span>
+            </div>
+            <div class="detail-item">
+              <label>Balance</label>
+              <span class="detail-value" id="accBalance">-</span>
+              <span class="unit">AXM</span>
+            </div>
+            <div class="detail-item">
+              <label>Nonce</label>
+              <span class="detail-value" id="accNonce">-</span>
+            </div>
+          </div>
         </div>
       </div>
-      <div id="accountError" class="text-muted" style="margin-top:12px;"></div>
-    </section>
 
-    <section class="section" id="accountResult" style="display:none;">
-      <h2 class="section-title">Account</h2>
-      <div class="grid">
-        <div><label>Account ID</label><span class="value mono truncate" id="accId">-</span></div>
-        <div><label>Balance</label><span class="value mono" id="accBalance">-</span><span class="unit">AXM</span></div>
-        <div><label>Nonce</label><span class="value mono" id="accNonce">-</span></div>
-      </div>
-    </section>
-  </main>
+    </div>
 
-  <footer class="footer">AXIOM Console &middot; Read-only</footer>
-  <div class="tooltip" id="tooltip"></div>
-  <script src="app.js"></script>
+    <div class="page-footer">AXIOM Console &middot; Read-only</div>
+  </div>
+</div>
+
+<div id="toastContainer" class="toast-container"></div>
+<div id="tooltip" class="tooltip"></div>
+<script src="app.js"></script>
 </body>
 </html>
