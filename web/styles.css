@@ -417,6 +417,11 @@ a:hover { color: #fcd34d; }
   padding: 16px 18px;
   animation: fadeUp 0.3s ease both;
   transition: border-color var(--t);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .metric-card:hover { border-color: var(--amber-border); }
@@ -441,7 +446,6 @@ a:hover { color: #fcd34d; }
 }
 
 .metric-value.sm {
-  font-size: 15px;
   letter-spacing: 0;
 }
 
