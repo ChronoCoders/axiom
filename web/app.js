@@ -101,45 +101,11 @@ function _startSSE() {
   });
 }
 
-/* ---- Height stepper ---- */
+/* ---- Height ---- */
 
-var _displayedHeight = null;
-var _targetHeight    = null;
-var _stepTimer       = null;
-
-function _stepToTarget() {
-  if (_displayedHeight === null || _targetHeight === null) return;
-  if (_displayedHeight >= _targetHeight) {
-    clearInterval(_stepTimer);
-    _stepTimer = null;
-    return;
-  }
-  _displayedHeight += 1;
-  _renderHeight(_displayedHeight);
-}
-
-function _renderHeight(h) {
+function setHeight(h) {
   setText("ovHeight",      fmt(h));
   setText("sidebarHeight", "h " + fmt(h));
-}
-
-function setHeight(newHeight) {
-  if (_displayedHeight === null) {
-    _displayedHeight = newHeight;
-    _targetHeight    = newHeight;
-    _renderHeight(newHeight);
-    return;
-  }
-  if (newHeight <= _displayedHeight) return;
-  _targetHeight = newHeight;
-  var delta    = _targetHeight - _displayedHeight;
-  var interval = Math.round(1000 / Math.max(1, delta));
-  interval     = Math.max(100, Math.min(1000, interval));
-  if (_stepTimer !== null) {
-    clearInterval(_stepTimer);
-    _stepTimer = null;
-  }
-  _stepTimer = setInterval(_stepToTarget, interval);
 }
 
 /* ---- DOM helpers ---- */
@@ -339,11 +305,14 @@ function initSidebarStatus() {
    ========================================================= */
 
 function initOverview() {
-  var txHistory    = [];
-  var blocksSeq    = 0;
+  var txHistory            = [];
+  var blocksSeq            = 0;
+  var _latestFetchedHeight = 0;
 
   subscribeBlock(function (height, hash) {
     fetchJSON("/blocks/" + height).then(function (b) {
+      if (b.height <= _latestFetchedHeight) return;
+      _latestFetchedHeight = b.height;
       var tbody = el("recentBlocksTable");
       if (!tbody) return;
       var tr = document.createElement("tr");
@@ -357,6 +326,11 @@ function initOverview() {
       tr.addEventListener("click", function () {
         window.location.href = "block.html?height=" + encodeURIComponent(b.height);
       });
+      var firstRow = tbody.querySelector("tr");
+      if (firstRow) {
+        var firstHeight = parseInt(firstRow.querySelector("td").textContent.replace(/,/g, ""), 10);
+        if (b.height <= firstHeight) return;
+      }
       tbody.insertBefore(tr, tbody.firstChild);
       var rows = tbody.querySelectorAll("tr");
       if (rows.length > 10) tbody.removeChild(rows[rows.length - 1]);
