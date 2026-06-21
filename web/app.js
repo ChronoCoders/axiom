@@ -214,22 +214,6 @@ function copyWithFeedback(text, btn) {
   });
 }
 
-/* ---- Toast ---- */
-
-function toast(title, message) {
-  var c = el("toastContainer");
-  if (!c) return;
-  var t = document.createElement("div");
-  t.className = "toast";
-  t.innerHTML = '<div class="toast-title">' + title + "</div>" +
-                '<div style="margin-top:2px;">' + (message || "") + "</div>";
-  c.appendChild(t);
-  setTimeout(function () {
-    t.classList.add("toast-exit");
-    setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 300);
-  }, 3500);
-}
-
 /* ---- Tooltip ---- */
 
 var _tip = null;
@@ -359,7 +343,6 @@ function initOverview() {
   var blocksSeq    = 0;
 
   subscribeBlock(function (height, hash) {
-    toast("New Block", "Block #" + fmt(height) + " committed");
     refreshBlocks();
   });
 
@@ -995,7 +978,6 @@ function initTransactions() {
         if (txHashOut) txHashOut.textContent = r.data.tx_hash || "";
         if (resultEl)  resultEl.style.display = "";
         if (nonceEl)   nonceEl.value = (parseInt(nonceEl.value || "0", 10) + 1);
-        toast("Transaction Submitted", shortHash(r.data.tx_hash || ""));
       } else {
         if (errEl) errEl.textContent = r.data.error || "Submission failed.";
       }
