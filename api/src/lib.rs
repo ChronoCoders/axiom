@@ -259,8 +259,11 @@ async fn status(
     let peer_count = state.peers.lock().map(|m| m.len()).unwrap_or(0);
     let mempool_size = state.mempool.lock().map(|m| m.size()).unwrap_or(0);
 
-    let next_height = height.saturating_add(1);
-    let next_protocol_version = ProtocolVersion::for_height(next_height).as_u64();
+    let next_protocol_version = if height.saturating_add(1) >= STAKING_ACTIVATION_HEIGHT {
+        2u64
+    } else {
+        1u64
+    };
 
     // Heuristic: if the latest block is more than 60 seconds old and we have
     // committed at least one block, the node is likely behind or stalled.
