@@ -83,7 +83,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                 parent_hash: BlockHash([0; 32]),
                 height: 0,
                 epoch: 0,
-                protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+                protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
                 round: 0,
                 proposer_id: ValidatorId([0; 32]), // Null proposer for genesis
                 transactions: vec![],
@@ -548,10 +548,10 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                                         ) {
                                                             Ok((new_state, new_staking)) => {
                                                                 let ok = match ProtocolVersion::for_height(block.height) {
-                                                                    ProtocolVersion::V1 => {
+                                                                    ProtocolVersion::Transfer => {
                                                                         storage.commit_block(&block, &new_state).is_ok()
                                                                     }
-                                                                    ProtocolVersion::V2 => {
+                                                                    ProtocolVersion::Staking => {
                                                                         storage.commit_block_v2(&block, &new_state, &new_staking).is_ok()
                                                                     }
                                                                 };
@@ -621,7 +621,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
             last_height_seen = height;
         }
 
-        if ProtocolVersion::for_height(next_height) == ProtocolVersion::V2 {
+        if ProtocolVersion::for_height(next_height) == ProtocolVersion::Staking {
             if bft_engine.as_ref().map(|e| e.height) != Some(next_height) {
                 let lock = match storage.load_lock_state() {
                     Ok(Some(l)) if l.height == next_height => l,
@@ -1465,10 +1465,10 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                 );
                                 let commit_res =
                                     match ProtocolVersion::for_height(final_block.height) {
-                                        ProtocolVersion::V1 => {
+                                        ProtocolVersion::Transfer => {
                                             storage.commit_block(&final_block, &new_state)
                                         }
-                                        ProtocolVersion::V2 => storage.commit_block_v2(
+                                        ProtocolVersion::Staking => storage.commit_block_v2(
                                             &final_block,
                                             &new_state,
                                             &new_staking,

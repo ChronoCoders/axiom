@@ -5,7 +5,8 @@ use axiom_crypto::{
 use axiom_execution::{execute_proposal_v2, select_proposer_v2, ExecutionError};
 use axiom_primitives::{
     Block, BlockHash, Evidence, LockState, Proposal, ProtocolVersion, Transaction, ValidatorId,
-    ValidatorSignature, Vote, VotePhase, V2_ACTIVATION_HEIGHT, V2_MIGRATION_STAKE_PER_VALIDATOR,
+    ValidatorSignature, Vote, VotePhase, STAKING_ACTIVATION_HEIGHT,
+    STAKING_MIGRATION_STAKE_PER_VALIDATOR,
 };
 use axiom_state::{StakingState, State};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -109,7 +110,7 @@ impl Engine {
             parent_hash: input.parent_hash,
             height: self.height,
             epoch: input.staking.epoch,
-            protocol_version: ProtocolVersion::V2.as_u64(),
+            protocol_version: ProtocolVersion::Staking.as_u64(),
             round: self.round,
             proposer_id: *input.proposer_id,
             transactions: input.transactions,
@@ -189,16 +190,16 @@ impl Engine {
             });
         }
 
-        if ProtocolVersion::for_height(proposal.block.height) != ProtocolVersion::V2
-            || proposal.block.protocol_version != ProtocolVersion::V2.as_u64()
+        if ProtocolVersion::for_height(proposal.block.height) != ProtocolVersion::Staking
+            || proposal.block.protocol_version != ProtocolVersion::Staking.as_u64()
         {
             return Err(ExecutionError::InvalidProtocolVersion {
-                expected: ProtocolVersion::V2.as_u64(),
+                expected: ProtocolVersion::Staking.as_u64(),
                 got: proposal.block.protocol_version,
             });
         }
 
-        let expected_epoch = if proposal.height == V2_ACTIVATION_HEIGHT && staking.is_empty() {
+        let expected_epoch = if proposal.height == STAKING_ACTIVATION_HEIGHT && staking.is_empty() {
             0
         } else {
             staking.epoch
@@ -485,8 +486,8 @@ impl Engine {
         if let Some(a) = staking.stakes.get(validator_id) {
             return a.0;
         }
-        if self.height == V2_ACTIVATION_HEIGHT && staking.is_empty() {
-            return V2_MIGRATION_STAKE_PER_VALIDATOR;
+        if self.height == STAKING_ACTIVATION_HEIGHT && staking.is_empty() {
+            return STAKING_MIGRATION_STAKE_PER_VALIDATOR;
         }
         0
     }

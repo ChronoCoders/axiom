@@ -8,8 +8,8 @@ use axiom_crypto::{
 use axiom_primitives::{
     serialize_block_canonical, serialize_evidence_canonical, AccountId, Block, BlockHash, Evidence,
     ProtocolVersion, StakeAmount, StateHash, Transaction, TransactionType, ValidatorId,
-    MAX_BLOCK_SIZE_BYTES, MAX_TRANSACTIONS_PER_BLOCK, SLASH_PERCENTAGE, V2_ACTIVATION_HEIGHT,
-    V2_MIGRATION_STAKE_PER_VALIDATOR,
+    MAX_BLOCK_SIZE_BYTES, MAX_TRANSACTIONS_PER_BLOCK, SLASH_PERCENTAGE, STAKING_ACTIVATION_HEIGHT,
+    STAKING_MIGRATION_STAKE_PER_VALIDATOR,
 };
 use axiom_state::{verify_staking_invariants, Account, StakingState, State, StateError};
 use std::collections::HashSet;
@@ -297,7 +297,7 @@ pub fn apply_block_v2(
             got: block.protocol_version,
         });
     }
-    if version == ProtocolVersion::V1 && block.round != 0 {
+    if version == ProtocolVersion::Transfer && block.round != 0 {
         return Err(ExecutionError::InvalidRound {
             expected: 0,
             got: block.round,
@@ -305,7 +305,7 @@ pub fn apply_block_v2(
     }
 
     match version {
-        ProtocolVersion::V1 => {
+        ProtocolVersion::Transfer => {
             for tx in &block.transactions {
                 if tx.tx_type != TransactionType::Transfer {
                     return Err(ExecutionError::V2TransactionInV1Block {
@@ -318,7 +318,7 @@ pub fn apply_block_v2(
                 apply_block(previous_state, block, previous_block_hash, previous_height)?;
             Ok((new_state, staking_state.clone()))
         }
-        ProtocolVersion::V2 => apply_block_v2_inner(
+        ProtocolVersion::Staking => apply_block_v2_inner(
             previous_state,
             staking_state,
             block,
@@ -351,7 +351,7 @@ fn apply_block_v2_inner(
         });
     }
 
-    let expected_epoch = if block.height == V2_ACTIVATION_HEIGHT && staking_state.is_empty() {
+    let expected_epoch = if block.height == STAKING_ACTIVATION_HEIGHT && staking_state.is_empty() {
         0
     } else {
         staking_state.epoch
@@ -379,7 +379,7 @@ fn apply_block_v2_inner(
     let mut new_staking = staking_state.clone();
     let before_active_set = active_validator_set(previous_state);
 
-    if block.height == V2_ACTIVATION_HEIGHT {
+    if block.height == STAKING_ACTIVATION_HEIGHT {
         if new_staking.is_empty() {
             new_staking = StakingState::new_active();
             apply_v1_to_v2_migration(&mut new_state, &mut new_staking)?;
@@ -462,7 +462,7 @@ pub fn execute_proposal_v2(
     let version = ProtocolVersion::for_height(height);
 
     match version {
-        ProtocolVersion::V1 => {
+        ProtocolVersion::Transfer => {
             for tx in transactions {
                 if tx.tx_type != TransactionType::Transfer {
                     return Err(ExecutionError::V2TransactionInV1Block {
@@ -474,12 +474,12 @@ pub fn execute_proposal_v2(
             let (new_state, hash) = execute_proposal(state, transactions, proposer_id)?;
             Ok((new_state, staking_state.clone(), hash))
         }
-        ProtocolVersion::V2 => {
+        ProtocolVersion::Staking => {
             let mut new_state = state.clone();
             let mut new_staking = staking_state.clone();
             let before_active_set = active_validator_set(state);
 
-            if height == V2_ACTIVATION_HEIGHT {
+            if height == STAKING_ACTIVATION_HEIGHT {
                 if new_staking.is_empty() {
                     new_staking = StakingState::new_active();
                     apply_v1_to_v2_migration(&mut new_state, &mut new_staking)?;
@@ -557,9 +557,9 @@ fn apply_v1_to_v2_migration(
     state: &mut State,
     staking: &mut StakingState,
 ) -> Result<(), ExecutionError> {
-    if V2_MIGRATION_STAKE_PER_VALIDATOR == 0 {
+    if STAKING_MIGRATION_STAKE_PER_VALIDATOR == 0 {
         return Err(ExecutionError::MigrationRequired {
-            activation_height: V2_ACTIVATION_HEIGHT,
+            activation_height: STAKING_ACTIVATION_HEIGHT,
         });
     }
 
@@ -575,21 +575,21 @@ fn apply_v1_to_v2_migration(
             .get_account_mut(&account_id)
             .ok_or(ExecutionError::SenderNotFound { sender: account_id })?;
 
-        if acc.balance < V2_MIGRATION_STAKE_PER_VALIDATOR {
+        if acc.balance < STAKING_MIGRATION_STAKE_PER_VALIDATOR {
             return Err(ExecutionError::InsufficientBalance {
                 account: account_id,
-                required: V2_MIGRATION_STAKE_PER_VALIDATOR,
+                required: STAKING_MIGRATION_STAKE_PER_VALIDATOR,
                 available: acc.balance,
             });
         }
 
         acc.balance = acc
             .balance
-            .checked_sub(V2_MIGRATION_STAKE_PER_VALIDATOR)
+            .checked_sub(STAKING_MIGRATION_STAKE_PER_VALIDATOR)
             .ok_or(ExecutionError::Underflow)?;
 
         staking
-            .apply_stake(vid, StakeAmount(V2_MIGRATION_STAKE_PER_VALIDATOR))
+            .apply_stake(vid, StakeAmount(STAKING_MIGRATION_STAKE_PER_VALIDATOR))
             .map_err(ExecutionError::StateError)?;
 
         if let Some(val) = state.validators.get_mut(&vid) {
@@ -782,7 +782,7 @@ fn validate_slash_evidence_transaction(
         });
     }
 
-    if evidence_height < V2_ACTIVATION_HEIGHT {
+    if evidence_height < STAKING_ACTIVATION_HEIGHT {
         return Err(ExecutionError::InvalidEvidence);
     }
 
@@ -921,8 +921,8 @@ fn effective_stake_for_height(
         return amount.0;
     }
 
-    if height == V2_ACTIVATION_HEIGHT && staking.is_empty() {
-        return V2_MIGRATION_STAKE_PER_VALIDATOR;
+    if height == STAKING_ACTIVATION_HEIGHT && staking.is_empty() {
+        return STAKING_MIGRATION_STAKE_PER_VALIDATOR;
     }
 
     0
@@ -1252,7 +1252,7 @@ mod tests {
     use axiom_crypto::test_keypair;
     use axiom_primitives::{
         GenesisAccount, GenesisConfig, GenesisValidator, Signature, TransactionType,
-        UNBONDING_PERIOD, V2_ACTIVATION_HEIGHT,
+        UNBONDING_PERIOD, STAKING_ACTIVATION_HEIGHT,
     };
 
     fn create_genesis_state() -> (State, axiom_crypto::PrivateKey, ValidatorId, AccountId) {
@@ -1297,7 +1297,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![],
@@ -1341,7 +1341,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![signed_tx],
@@ -1403,7 +1403,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![signed_tx],
@@ -1439,7 +1439,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![signed_tx],
@@ -1477,7 +1477,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![signed_tx],
@@ -1512,7 +1512,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![signed_tx],
@@ -1535,7 +1535,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 2, // Expected 1
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![],
@@ -1565,7 +1565,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![],
@@ -1602,7 +1602,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions,
@@ -1645,7 +1645,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![signed_tx],
@@ -1688,7 +1688,7 @@ mod tests {
             parent_hash: wrong_hash, // Expected 00...
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![],
@@ -1711,7 +1711,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![],
@@ -1761,7 +1761,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![signed_tx1, signed_tx2],
@@ -1801,7 +1801,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![],
@@ -1828,7 +1828,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![],
@@ -1878,7 +1878,7 @@ mod tests {
     fn migrate_to_v2(state: &State, proposer_id: &ValidatorId) -> (State, StakingState) {
         let staking = StakingState::empty();
         let (state2, staking2, _) =
-            execute_proposal_v2(state, &staking, &[], proposer_id, V2_ACTIVATION_HEIGHT).unwrap();
+            execute_proposal_v2(state, &staking, &[], proposer_id, STAKING_ACTIVATION_HEIGHT).unwrap();
         (state2, staking2)
     }
 
@@ -1904,7 +1904,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![signed_tx],
@@ -1943,7 +1943,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![signed_tx],
@@ -1964,7 +1964,7 @@ mod tests {
     fn test_v2_slash_evidence_double_vote_burns_and_jails() {
         let (state0, sk, val_id, acc_id) = create_rich_genesis_state();
         let (state, staking) = migrate_to_v2(&state0, &val_id);
-        let height = V2_ACTIVATION_HEIGHT + 1;
+        let height = STAKING_ACTIVATION_HEIGHT + 1;
 
         let mut vote_a = axiom_primitives::Vote {
             height,
@@ -2022,7 +2022,7 @@ mod tests {
     fn test_v2_stake_success() {
         let (state0, sk, val_id, acc_id) = create_rich_genesis_state();
         let (state, staking) = migrate_to_v2(&state0, &val_id);
-        let height = V2_ACTIVATION_HEIGHT + 1;
+        let height = STAKING_ACTIVATION_HEIGHT + 1;
 
         let tx = Transaction {
             sender: acc_id,
@@ -2041,12 +2041,12 @@ mod tests {
 
         assert_eq!(
             new_state.get_account(&acc_id).unwrap().balance,
-            1_000_000 - V2_MIGRATION_STAKE_PER_VALIDATOR + 10 - 1 + 10
+            1_000_000 - STAKING_MIGRATION_STAKE_PER_VALIDATOR + 10 - 1 + 10
         );
         let vid = ValidatorId(acc_id.0);
         assert_eq!(
             new_staking.stakes.get(&vid).unwrap().0,
-            V2_MIGRATION_STAKE_PER_VALIDATOR + 1
+            STAKING_MIGRATION_STAKE_PER_VALIDATOR + 1
         );
     }
 
@@ -2057,11 +2057,11 @@ mod tests {
             let val_id = ValidatorId(pk.0);
             let acc_id = AccountId(pk.0);
             let genesis = GenesisConfig {
-                total_supply: V2_MIGRATION_STAKE_PER_VALIDATOR,
+                total_supply: STAKING_MIGRATION_STAKE_PER_VALIDATOR,
                 block_reward: 10,
                 accounts: vec![GenesisAccount {
                     id: acc_id,
-                    balance: V2_MIGRATION_STAKE_PER_VALIDATOR,
+                    balance: STAKING_MIGRATION_STAKE_PER_VALIDATOR,
                     nonce: 0,
                 }],
                 validators: vec![GenesisValidator {
@@ -2074,7 +2074,7 @@ mod tests {
             (State::from_genesis(&genesis).unwrap(), sk, val_id, acc_id)
         };
         let (state, staking) = migrate_to_v2(&state0, &val_id);
-        let height = V2_ACTIVATION_HEIGHT + 1;
+        let height = STAKING_ACTIVATION_HEIGHT + 1;
 
         let tx = Transaction {
             sender: acc_id,
@@ -2101,16 +2101,16 @@ mod tests {
         let staking = StakingState::empty();
 
         let (state1, staking1, _hash) =
-            execute_proposal_v2(&state0, &staking, &[], &val_id, V2_ACTIVATION_HEIGHT).unwrap();
+            execute_proposal_v2(&state0, &staking, &[], &val_id, STAKING_ACTIVATION_HEIGHT).unwrap();
 
         let vid = ValidatorId(acc_id.0);
         assert_eq!(
             staking1.stakes.get(&vid).unwrap().0,
-            V2_MIGRATION_STAKE_PER_VALIDATOR
+            STAKING_MIGRATION_STAKE_PER_VALIDATOR
         );
         assert_eq!(
             state1.get_account(&acc_id).unwrap().balance,
-            1_000_000 - V2_MIGRATION_STAKE_PER_VALIDATOR + 10
+            1_000_000 - STAKING_MIGRATION_STAKE_PER_VALIDATOR + 10
         );
         assert!(state1.get_validator(&vid).unwrap().active);
     }
@@ -2119,7 +2119,7 @@ mod tests {
     fn test_v2_unstake_success() {
         let (state0, sk, val_id, acc_id) = create_rich_genesis_state();
         let (state, staking) = migrate_to_v2(&state0, &val_id);
-        let height = V2_ACTIVATION_HEIGHT + 1;
+        let height = STAKING_ACTIVATION_HEIGHT + 1;
 
         let unstake_tx = Transaction {
             sender: acc_id,
@@ -2140,7 +2140,7 @@ mod tests {
         let vid = ValidatorId(acc_id.0);
         assert_eq!(
             staking2.stakes.get(&vid).unwrap().0,
-            V2_MIGRATION_STAKE_PER_VALIDATOR - 1
+            STAKING_MIGRATION_STAKE_PER_VALIDATOR - 1
         );
         assert_eq!(staking2.unbonding_queue.len(), 1);
         assert_eq!(staking2.unbonding_queue[0].amount.0, 1);
@@ -2193,7 +2193,7 @@ mod tests {
         };
         let state0 = State::from_genesis(&genesis).unwrap();
         let (mut state, mut staking) = migrate_to_v2(&state0, &val_1);
-        let height = V2_ACTIVATION_HEIGHT + 1;
+        let height = STAKING_ACTIVATION_HEIGHT + 1;
 
         let removed = staking.stakes.remove(&val_1).unwrap();
         let acc = state.get_account_mut(&acc_1).unwrap();
@@ -2220,7 +2220,7 @@ mod tests {
         let (state0, sk, val_id, acc_id) = create_rich_genesis_state();
         let (state, staking) = migrate_to_v2(&state0, &val_id);
 
-        let unstake_height = V2_ACTIVATION_HEIGHT + 1;
+        let unstake_height = STAKING_ACTIVATION_HEIGHT + 1;
         let unstake_tx = Transaction {
             sender: acc_id,
             recipient: acc_id,
@@ -2252,7 +2252,7 @@ mod tests {
         assert!(staking3.unbonding_queue.is_empty());
         assert_eq!(
             state3.get_account(&acc_id).unwrap().balance,
-            1_000_000 - V2_MIGRATION_STAKE_PER_VALIDATOR + 10 + 10 + 1 + 10
+            1_000_000 - STAKING_MIGRATION_STAKE_PER_VALIDATOR + 10 + 10 + 1 + 10
         );
     }
 
@@ -2266,7 +2266,7 @@ mod tests {
             parent_hash: prev_hash,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![],
@@ -2291,7 +2291,7 @@ mod tests {
     fn test_v2_transfer_still_works() {
         let (state0, sk, val_id, acc_id) = create_rich_genesis_state();
         let (state, staking) = migrate_to_v2(&state0, &val_id);
-        let height = V2_ACTIVATION_HEIGHT + 1;
+        let height = STAKING_ACTIVATION_HEIGHT + 1;
 
         let (_recipient_sk, recipient_pk) = test_keypair("recipient");
         let recipient_id = AccountId(recipient_pk.0);
@@ -2313,7 +2313,7 @@ mod tests {
 
         assert_eq!(
             new_state.get_account(&acc_id).unwrap().balance,
-            1_000_000 - V2_MIGRATION_STAKE_PER_VALIDATOR + 10 - 500 + 10
+            1_000_000 - STAKING_MIGRATION_STAKE_PER_VALIDATOR + 10 - 500 + 10
         );
         assert_eq!(new_state.get_account(&recipient_id).unwrap().balance, 500);
     }
@@ -2395,7 +2395,7 @@ mod tests {
             parent_hash: prev_hash_0,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_4,
             transactions: vec![],
@@ -2426,7 +2426,7 @@ mod tests {
             parent_hash: block_hash_1,
             height: 2,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_3,
             transactions: vec![],
@@ -2444,7 +2444,7 @@ mod tests {
             parent_hash: prev_hash_0,
             height: 1,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_4,
             transactions: vec![],
@@ -2465,7 +2465,7 @@ mod tests {
             parent_hash: block_hash_1,
             height: 2,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_2,
             transactions: vec![],
@@ -2507,7 +2507,7 @@ mod tests {
             parent_hash: block_hash_1,
             height: 2,
             epoch: 1,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_3,
             transactions: vec![],
@@ -2545,7 +2545,7 @@ mod tests {
             parent_hash: block_hash_1,
             height: 2,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_3,
             transactions: vec![signed_tx_1.clone()],
@@ -2598,7 +2598,7 @@ mod tests {
             parent_hash: block_hash_2,
             height: 3,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_1,
             transactions: vec![signed_tx_2_invalid_nonce],
@@ -2630,7 +2630,7 @@ mod tests {
             parent_hash: block_hash_2,
             height: 3,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_1,
             transactions: vec![signed_tx_3_invalid_sig],
@@ -2683,7 +2683,7 @@ mod tests {
             parent_hash: block_hash_2,
             height: 3,
             epoch: 0,
-            protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+            protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_1,
             transactions: vec![signed_tx_4_to_new_account],

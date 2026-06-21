@@ -4,7 +4,7 @@ use axiom_consensus::bft::{Engine, Outbound, ProposalInputs, Step};
 use axiom_crypto::{compute_block_hash, test_keypair, verify_precommit, PrivateKey};
 use axiom_primitives::{
     AccountId, BlockHash, GenesisAccount, GenesisConfig, GenesisValidator, LockState,
-    ProtocolVersion, ValidatorId, VotePhase, V2_ACTIVATION_HEIGHT,
+    ProtocolVersion, ValidatorId, VotePhase, STAKING_ACTIVATION_HEIGHT,
 };
 use axiom_state::{StakingState, State};
 use std::collections::BTreeMap;
@@ -89,8 +89,8 @@ fn mk_state_and_staking() -> (State, StakingState, Vec<(ValidatorId, PrivateKey)
 #[test]
 fn test_v2_bft_commit_flow_and_signatures() {
     let (state, staking, keys) = mk_state_and_staking();
-    let height = V2_ACTIVATION_HEIGHT + 1;
-    assert_eq!(ProtocolVersion::for_height(height), ProtocolVersion::V2);
+    let height = STAKING_ACTIVATION_HEIGHT + 1;
+    assert_eq!(ProtocolVersion::for_height(height), ProtocolVersion::Staking);
 
     let mut engines: Vec<(ValidatorId, Engine)> = keys
         .iter()
@@ -202,7 +202,7 @@ fn test_v2_bft_commit_flow_and_signatures() {
     let committed = committed.expect("should commit");
     assert_eq!(committed.height, height);
     assert_eq!(committed.round, 0);
-    assert_eq!(committed.protocol_version, ProtocolVersion::V2.as_u64());
+    assert_eq!(committed.protocol_version, ProtocolVersion::Staking.as_u64());
     assert_eq!(compute_block_hash(&committed), block_hash);
     assert_eq!(committed.signatures.len(), 3);
 
@@ -221,7 +221,7 @@ fn test_v2_bft_commit_flow_and_signatures() {
 #[test]
 fn test_v2_lock_forces_prevote_in_later_round() {
     let (state, staking, keys) = mk_state_and_staking();
-    let height = V2_ACTIVATION_HEIGHT + 1;
+    let height = STAKING_ACTIVATION_HEIGHT + 1;
     let (vid, sk) = &keys[0];
 
     let mut engine = Engine::new(

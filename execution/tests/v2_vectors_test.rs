@@ -6,7 +6,7 @@ use axiom_crypto::{
 use axiom_execution::{execute_proposal_v2, select_proposer_v2};
 use axiom_primitives::{
     AccountId, Block, BlockHash, Evidence, ProtocolVersion, Signature, Transaction,
-    TransactionType, ValidatorId, Vote, VotePhase, V2_ACTIVATION_HEIGHT,
+    TransactionType, ValidatorId, Vote, VotePhase, STAKING_ACTIVATION_HEIGHT,
 };
 use axiom_state::{StakingState, State};
 
@@ -51,7 +51,7 @@ fn test_v2_locked_vectors() {
 
     let mut parent = BlockHash([0u8; 32]);
 
-    let height_0 = V2_ACTIVATION_HEIGHT;
+    let height_0 = STAKING_ACTIVATION_HEIGHT;
     let proposer_0 = select_proposer_v2(&state, &staking, height_0, 0).unwrap();
     let (state_0, staking_0, state_hash_0) =
         execute_proposal_v2(&state, &staking, &[], &proposer_0, height_0).unwrap();
@@ -59,7 +59,7 @@ fn test_v2_locked_vectors() {
         parent_hash: parent,
         height: height_0,
         epoch: 0,
-        protocol_version: ProtocolVersion::V2.as_u64(),
+        protocol_version: ProtocolVersion::Staking.as_u64(),
         round: 0,
         proposer_id: proposer_0,
         transactions: vec![],
@@ -85,7 +85,7 @@ fn test_v2_locked_vectors() {
     staking = staking_0;
     parent = block_hash_0;
 
-    let height_1 = V2_ACTIVATION_HEIGHT + 1;
+    let height_1 = STAKING_ACTIVATION_HEIGHT + 1;
     let proposer_1 = select_proposer_v2(&state, &staking, height_1, 0).unwrap();
 
     let sender_1 = AccountId(v2.0);
@@ -111,7 +111,7 @@ fn test_v2_locked_vectors() {
         parent_hash: parent,
         height: height_1,
         epoch: 0,
-        protocol_version: ProtocolVersion::V2.as_u64(),
+        protocol_version: ProtocolVersion::Staking.as_u64(),
         round: 0,
         proposer_id: proposer_1,
         transactions: txs_1,
@@ -138,7 +138,7 @@ fn test_v2_locked_vectors() {
     staking = staking_1;
     parent = block_hash_1;
 
-    let height_2 = V2_ACTIVATION_HEIGHT + 2;
+    let height_2 = STAKING_ACTIVATION_HEIGHT + 2;
     let proposer_2 = select_proposer_v2(&state, &staking, height_2, 0).unwrap();
 
     let sender_2 = AccountId(v2.0);
@@ -164,7 +164,7 @@ fn test_v2_locked_vectors() {
         parent_hash: parent,
         height: height_2,
         epoch: staking.epoch,
-        protocol_version: ProtocolVersion::V2.as_u64(),
+        protocol_version: ProtocolVersion::Staking.as_u64(),
         round: 0,
         proposer_id: proposer_2,
         transactions: txs_2,
@@ -191,7 +191,7 @@ fn test_v2_locked_vectors() {
     staking = staking_2;
     parent = block_hash_2;
 
-    let height_3 = V2_ACTIVATION_HEIGHT + 3;
+    let height_3 = STAKING_ACTIVATION_HEIGHT + 3;
     let proposer_3 = select_proposer_v2(&state, &staking, height_3, 0).unwrap();
 
     let offender_vote_a = mk_vote(
@@ -247,7 +247,7 @@ fn test_v2_locked_vectors() {
         parent_hash: parent,
         height: height_3,
         epoch: staking.epoch,
-        protocol_version: ProtocolVersion::V2.as_u64(),
+        protocol_version: ProtocolVersion::Staking.as_u64(),
         round: 0,
         proposer_id: proposer_3,
         transactions: txs_3,

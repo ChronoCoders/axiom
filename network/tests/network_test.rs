@@ -15,7 +15,7 @@ fn dummy_block() -> Block {
         parent_hash: BlockHash([0; 32]),
         height: 1,
         epoch: 1,
-        protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+        protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
         round: 0,
         proposer_id: ValidatorId([1; 32]),
         transactions: vec![],
@@ -51,7 +51,7 @@ fn dummy_vote() -> NetworkMessage {
 fn dummy_proposal() -> Proposal {
     let mut block = dummy_block();
     block.height = 10_000;
-    block.protocol_version = axiom_primitives::PROTOCOL_VERSION_V2;
+    block.protocol_version = axiom_primitives::PROTOCOL_VERSION_STAKING;
     block.round = 0;
     Proposal {
         height: 10_000,

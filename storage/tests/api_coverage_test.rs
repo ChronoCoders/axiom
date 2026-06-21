@@ -60,7 +60,7 @@ fn create_dummy_block(height: u64, parent: BlockHash) -> Block {
         parent_hash: parent,
         height,
         epoch: 1,
-        protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+        protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
         round: 0,
         proposer_id: dummy_validator_id(1),
         transactions: vec![],
