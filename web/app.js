@@ -76,6 +76,43 @@ function _startStatusPoll() {
   setInterval(poll, 1000);
 }
 
+/* ---- Height stepper ---- */
+
+var _displayedHeight = null;
+var _targetHeight    = null;
+var _stepTimer       = null;
+var STEP_INTERVAL_MS = 400;
+
+function _stepToTarget() {
+  if (_displayedHeight === null || _targetHeight === null) return;
+  if (_displayedHeight >= _targetHeight) {
+    clearInterval(_stepTimer);
+    _stepTimer = null;
+    return;
+  }
+  _displayedHeight += 1;
+  _renderHeight(_displayedHeight);
+}
+
+function _renderHeight(h) {
+  setText("ovHeight",      fmt(h));
+  setText("sidebarHeight", "h " + fmt(h));
+}
+
+function setHeight(newHeight) {
+  if (_displayedHeight === null) {
+    _displayedHeight = newHeight;
+    _targetHeight    = newHeight;
+    _renderHeight(newHeight);
+    return;
+  }
+  if (newHeight <= _displayedHeight) return;
+  _targetHeight = newHeight;
+  if (_stepTimer === null) {
+    _stepTimer = setInterval(_stepToTarget, STEP_INTERVAL_MS);
+  }
+}
+
 /* ---- DOM helpers ---- */
 
 function el(id) { return document.getElementById(id); }
@@ -279,7 +316,7 @@ function doSearch(q, resultsEl) {
 function initSidebarStatus() {
   subscribeStatus(function (s) {
     if (!s) { setPulse(false); return; }
-    setText("sidebarHeight", "h " + fmt(s.height));
+    setHeight(s.height);
     setPulse(true);
   });
 }
@@ -296,7 +333,7 @@ function initOverview() {
 
   subscribeStatus(function (s) {
     if (!s) { setPulse(false); return; }
-    setText("ovHeight", fmt(s.height));
+    setHeight(s.height);
     setText("ovValidators", fmt(s.validator_count));
     setText("ovSyncing",   s.syncing ? "Yes" : "No");
     var _proto = s.protocol_version;
