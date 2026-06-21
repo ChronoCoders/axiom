@@ -9,40 +9,42 @@ pub const PROTOCOL_VERSION: u64 = 2;
 pub const MAX_TRANSACTIONS_PER_BLOCK: usize = 1000;
 pub const MAX_BLOCK_SIZE_BYTES: usize = 1_048_576; // 1 MB
 
-pub const PROTOCOL_V1_VERSION: u64 = 1;
-pub const PROTOCOL_V2_VERSION: u64 = 2;
-pub const PROTOCOL_VERSION_V1: u64 = PROTOCOL_V1_VERSION;
-pub const PROTOCOL_VERSION_V2: u64 = PROTOCOL_V2_VERSION;
-pub const V2_ACTIVATION_HEIGHT: u64 = 10_000;
+pub const PROTOCOL_TRANSFER_VERSION: u64 = 1;
+pub const PROTOCOL_STAKING_VERSION: u64 = 2;
+pub const PROTOCOL_VERSION_TRANSFER: u64 = PROTOCOL_TRANSFER_VERSION;
+pub const PROTOCOL_VERSION_STAKING: u64 = PROTOCOL_STAKING_VERSION;
+pub const STAKING_ACTIVATION_HEIGHT: u64 = 10_000;
 pub const MIN_VALIDATOR_STAKE: u64 = 100_000;
 pub const UNBONDING_PERIOD: u64 = 1_000;
 pub const SLASH_PERCENTAGE: u64 = 10;
-pub const V2_MIGRATION_STAKE_PER_VALIDATOR: u64 = MIN_VALIDATOR_STAKE;
+pub const STAKING_MIGRATION_STAKE_PER_VALIDATOR: u64 = MIN_VALIDATOR_STAKE;
 
 /// Protocol version derived deterministically from block height.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProtocolVersion {
-    V1,
-    V2,
+    /// Transfer-only protocol (height < STAKING_ACTIVATION_HEIGHT).
+    Transfer,
+    /// Staking protocol — adds Stake, Unstake, SlashEvidence (height >= STAKING_ACTIVATION_HEIGHT).
+    Staking,
 }
 
 impl ProtocolVersion {
     /// Returns the protocol version for a given block height.
-    /// height < V2_ACTIVATION_HEIGHT → V1
-    /// height >= V2_ACTIVATION_HEIGHT → V2
+    /// height < STAKING_ACTIVATION_HEIGHT → Transfer
+    /// height >= STAKING_ACTIVATION_HEIGHT → Staking
     pub fn for_height(height: u64) -> Self {
-        if height < V2_ACTIVATION_HEIGHT {
-            ProtocolVersion::V1
+        if height < STAKING_ACTIVATION_HEIGHT {
+            ProtocolVersion::Transfer
         } else {
-            ProtocolVersion::V2
+            ProtocolVersion::Staking
         }
     }
 
     /// Returns the numeric version identifier.
     pub fn as_u64(&self) -> u64 {
         match self {
-            ProtocolVersion::V1 => PROTOCOL_V1_VERSION,
-            ProtocolVersion::V2 => PROTOCOL_V2_VERSION,
+            ProtocolVersion::Transfer => PROTOCOL_TRANSFER_VERSION,
+            ProtocolVersion::Staking => PROTOCOL_STAKING_VERSION,
         }
     }
 }
@@ -50,8 +52,8 @@ impl ProtocolVersion {
 impl fmt::Display for ProtocolVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ProtocolVersion::V1 => write!(f, "v1"),
-            ProtocolVersion::V2 => write!(f, "v2"),
+            ProtocolVersion::Transfer => write!(f, "transfer"),
+            ProtocolVersion::Staking => write!(f, "staking"),
         }
     }
 }
@@ -73,8 +75,8 @@ impl TransactionType {
     /// Returns true if this transaction type is valid under the given protocol version.
     pub fn is_valid_for(&self, version: ProtocolVersion) -> bool {
         match version {
-            ProtocolVersion::V1 => matches!(self, TransactionType::Transfer),
-            ProtocolVersion::V2 => true,
+            ProtocolVersion::Transfer => matches!(self, TransactionType::Transfer),
+            ProtocolVersion::Staking => true,
         }
     }
 
@@ -508,7 +510,7 @@ pub struct Block {
 }
 
 fn default_protocol_version() -> u64 {
-    PROTOCOL_VERSION_V1
+    PROTOCOL_VERSION_TRANSFER
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -640,7 +642,7 @@ pub fn serialize_block_canonical(block: &Block) -> Vec<u8> {
     serialize_u64(block.height, &mut buf);
     // 3. epoch (u64 big-endian)
     serialize_u64(block.epoch, &mut buf);
-    if block.protocol_version == PROTOCOL_VERSION_V2 {
+    if block.protocol_version == PROTOCOL_VERSION_STAKING {
         // v2 block header extension
         serialize_u64(block.protocol_version, &mut buf);
         serialize_u64(block.round, &mut buf);
@@ -651,7 +653,7 @@ pub fn serialize_block_canonical(block: &Block) -> Vec<u8> {
     let tx_count = block.transactions.len() as u32;
     buf.extend_from_slice(&tx_count.to_be_bytes());
     for tx in &block.transactions {
-        if block.protocol_version == PROTOCOL_VERSION_V2 {
+        if block.protocol_version == PROTOCOL_VERSION_STAKING {
             buf.extend(serialize_transaction_canonical_v2(tx));
         } else {
             buf.extend(serialize_transaction_canonical_v1(tx));
@@ -899,7 +901,7 @@ mod tests {
             parent_hash: BlockHash([0u8; 32]),
             height: 1,
             epoch: 2,
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: ValidatorId([0xaa; 32]),
             transactions: vec![],
@@ -926,7 +928,7 @@ mod tests {
             parent_hash: BlockHash([0x01; 32]),
             height: 100,
             epoch: 5,
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: ValidatorId([0x02; 32]),
             transactions: vec![],
@@ -1111,7 +1113,7 @@ mod tests {
             parent_hash: BlockHash([0; 32]),
             height: 10,
             epoch: 0,
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: val_id,
             transactions: vec![],
@@ -1130,45 +1132,45 @@ mod tests {
     // v2 scaffolding tests
 
     #[test]
-    fn test_protocol_version_for_height_v1() {
-        assert_eq!(ProtocolVersion::for_height(0), ProtocolVersion::V1);
-        assert_eq!(ProtocolVersion::for_height(1), ProtocolVersion::V1);
-        assert_eq!(ProtocolVersion::for_height(9_999), ProtocolVersion::V1);
+    fn test_protocol_version_for_height_transfer() {
+        assert_eq!(ProtocolVersion::for_height(0), ProtocolVersion::Transfer);
+        assert_eq!(ProtocolVersion::for_height(1), ProtocolVersion::Transfer);
+        assert_eq!(ProtocolVersion::for_height(9_999), ProtocolVersion::Transfer);
     }
 
     #[test]
-    fn test_protocol_version_for_height_v2() {
-        assert_eq!(ProtocolVersion::for_height(10_000), ProtocolVersion::V2);
-        assert_eq!(ProtocolVersion::for_height(10_001), ProtocolVersion::V2);
-        assert_eq!(ProtocolVersion::for_height(u64::MAX), ProtocolVersion::V2);
+    fn test_protocol_version_for_height_staking() {
+        assert_eq!(ProtocolVersion::for_height(10_000), ProtocolVersion::Staking);
+        assert_eq!(ProtocolVersion::for_height(10_001), ProtocolVersion::Staking);
+        assert_eq!(ProtocolVersion::for_height(u64::MAX), ProtocolVersion::Staking);
     }
 
     #[test]
     fn test_protocol_version_as_u64() {
-        assert_eq!(ProtocolVersion::V1.as_u64(), 1);
-        assert_eq!(ProtocolVersion::V2.as_u64(), 2);
+        assert_eq!(ProtocolVersion::Transfer.as_u64(), 1);
+        assert_eq!(ProtocolVersion::Staking.as_u64(), 2);
     }
 
     #[test]
     fn test_protocol_version_display() {
-        assert_eq!(format!("{}", ProtocolVersion::V1), "v1");
-        assert_eq!(format!("{}", ProtocolVersion::V2), "v2");
+        assert_eq!(format!("{}", ProtocolVersion::Transfer), "transfer");
+        assert_eq!(format!("{}", ProtocolVersion::Staking), "staking");
     }
 
     #[test]
-    fn test_transaction_type_valid_for_v1() {
-        assert!(TransactionType::Transfer.is_valid_for(ProtocolVersion::V1));
-        assert!(!TransactionType::Stake.is_valid_for(ProtocolVersion::V1));
-        assert!(!TransactionType::Unstake.is_valid_for(ProtocolVersion::V1));
-        assert!(!TransactionType::SlashEvidence.is_valid_for(ProtocolVersion::V1));
+    fn test_transaction_type_valid_for_transfer_protocol() {
+        assert!(TransactionType::Transfer.is_valid_for(ProtocolVersion::Transfer));
+        assert!(!TransactionType::Stake.is_valid_for(ProtocolVersion::Transfer));
+        assert!(!TransactionType::Unstake.is_valid_for(ProtocolVersion::Transfer));
+        assert!(!TransactionType::SlashEvidence.is_valid_for(ProtocolVersion::Transfer));
     }
 
     #[test]
-    fn test_transaction_type_valid_for_v2() {
-        assert!(TransactionType::Transfer.is_valid_for(ProtocolVersion::V2));
-        assert!(TransactionType::Stake.is_valid_for(ProtocolVersion::V2));
-        assert!(TransactionType::Unstake.is_valid_for(ProtocolVersion::V2));
-        assert!(TransactionType::SlashEvidence.is_valid_for(ProtocolVersion::V2));
+    fn test_transaction_type_valid_for_staking_protocol() {
+        assert!(TransactionType::Transfer.is_valid_for(ProtocolVersion::Staking));
+        assert!(TransactionType::Stake.is_valid_for(ProtocolVersion::Staking));
+        assert!(TransactionType::Unstake.is_valid_for(ProtocolVersion::Staking));
+        assert!(TransactionType::SlashEvidence.is_valid_for(ProtocolVersion::Staking));
     }
 
     #[test]
@@ -1236,8 +1238,8 @@ mod tests {
     }
 
     #[test]
-    fn test_v2_constants_are_deterministic() {
-        assert_eq!(V2_ACTIVATION_HEIGHT, 10_000);
+    fn test_staking_constants_are_deterministic() {
+        assert_eq!(STAKING_ACTIVATION_HEIGHT, 10_000);
         assert_eq!(MIN_VALIDATOR_STAKE, 100_000);
         assert_eq!(UNBONDING_PERIOD, 1_000);
         assert_eq!(SLASH_PERCENTAGE, 10);
@@ -1249,7 +1251,7 @@ mod tests {
             parent_hash: BlockHash([0u8; 32]),
             height: 1,
             epoch: 0,
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_TRANSFER,
             round: 0,
             proposer_id: ValidatorId([0xaa; 32]),
             transactions: vec![],

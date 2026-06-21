@@ -50,8 +50,8 @@ pub fn compute_transaction_hash_v2(tx: &Transaction) -> TransactionHash {
 
 pub fn compute_transaction_hash_for_height(height: u64, tx: &Transaction) -> TransactionHash {
     match ProtocolVersion::for_height(height) {
-        ProtocolVersion::V1 => compute_transaction_hash(tx),
-        ProtocolVersion::V2 => compute_transaction_hash_v2(tx),
+        ProtocolVersion::Transfer => compute_transaction_hash(tx),
+        ProtocolVersion::Staking => compute_transaction_hash_v2(tx),
     }
 }
 
@@ -122,8 +122,8 @@ pub fn sign_transaction_for_height(
     tx: &Transaction,
 ) -> Signature {
     match ProtocolVersion::for_height(height) {
-        ProtocolVersion::V1 => sign_transaction(private_key, tx),
-        ProtocolVersion::V2 => sign_transaction_v2(private_key, tx),
+        ProtocolVersion::Transfer => sign_transaction(private_key, tx),
+        ProtocolVersion::Staking => sign_transaction_v2(private_key, tx),
     }
 }
 
@@ -161,8 +161,8 @@ pub fn verify_transaction_signature_for_height(
     tx: &Transaction,
 ) -> Result<(), CryptoError> {
     match ProtocolVersion::for_height(height) {
-        ProtocolVersion::V1 => verify_transaction_signature(tx),
-        ProtocolVersion::V2 => verify_transaction_signature_v2(tx),
+        ProtocolVersion::Transfer => verify_transaction_signature(tx),
+        ProtocolVersion::Staking => verify_transaction_signature_v2(tx),
     }
 }
 

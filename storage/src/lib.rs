@@ -761,7 +761,7 @@ impl Storage {
             params![state.block_reward.to_string()],
         )?;
 
-        if matches!(version, ProtocolVersion::V2) {
+        if matches!(version, ProtocolVersion::Staking) {
             tx.execute("DELETE FROM stakes", [])?;
             for (vid, amount) in &staking.stakes {
                 tx.execute(

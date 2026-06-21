@@ -3,8 +3,8 @@
 use axiom_crypto::compute_block_hash;
 use axiom_execution::{compute_state_hash, execute_proposal, select_proposer};
 use axiom_primitives::{
-    Block, BlockHash, ProtocolVersion, StateHash, ValidatorId, PROTOCOL_VERSION_V1,
-    V2_ACTIVATION_HEIGHT,
+    Block, BlockHash, ProtocolVersion, StateHash, ValidatorId, PROTOCOL_VERSION_TRANSFER,
+    STAKING_ACTIVATION_HEIGHT,
 };
 use axiom_state::State;
 use axiom_storage::Storage;
@@ -25,7 +25,7 @@ fn main() {
     let target_height = if !args.is_empty() {
         args[0].parse::<u64>().unwrap_or_else(|_| usage())
     } else {
-        V2_ACTIVATION_HEIGHT.saturating_sub(1)
+        STAKING_ACTIVATION_HEIGHT.saturating_sub(1)
     };
     if !args.is_empty() {
         args.remove(0);
@@ -57,7 +57,7 @@ fn main() {
         parent_hash: BlockHash([0u8; 32]),
         height: 0,
         epoch: 0,
-        protocol_version: PROTOCOL_VERSION_V1,
+        protocol_version: PROTOCOL_VERSION_TRANSFER,
         round: 0,
         proposer_id: ValidatorId([0u8; 32]),
         transactions: vec![],
@@ -77,7 +77,7 @@ fn main() {
             parent_hash,
             height: h,
             epoch: 0,
-            protocol_version: ProtocolVersion::V1.as_u64(),
+            protocol_version: ProtocolVersion::Transfer.as_u64(),
             round: 0,
             proposer_id: proposer,
             transactions: vec![],

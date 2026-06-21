@@ -6,7 +6,7 @@ use axiom_network::PeerMap;
 use axiom_primitives::{
     serialize_transaction_canonical_v1, serialize_transaction_canonical_v2, AccountId, BlockHash,
     LockState, ProtocolVersion, Transaction, TransactionType, ValidatorId, ValidatorSignature,
-    PROTOCOL_VERSION, V2_ACTIVATION_HEIGHT, V2_MIGRATION_STAKE_PER_VALIDATOR,
+    PROTOCOL_VERSION, STAKING_ACTIVATION_HEIGHT, STAKING_MIGRATION_STAKE_PER_VALIDATOR,
 };
 use axiom_storage::Storage;
 use axum::{
@@ -504,16 +504,16 @@ async fn list_validators(
             voting_power: v.voting_power,
             account_id: v.account_id.to_string(),
             active: v.active,
-            stake_amount: if latest_height >= V2_ACTIVATION_HEIGHT {
-                if latest_height == V2_ACTIVATION_HEIGHT && staking.is_empty() {
-                    Some(V2_MIGRATION_STAKE_PER_VALIDATOR)
+            stake_amount: if latest_height >= STAKING_ACTIVATION_HEIGHT {
+                if latest_height == STAKING_ACTIVATION_HEIGHT && staking.is_empty() {
+                    Some(STAKING_MIGRATION_STAKE_PER_VALIDATOR)
                 } else {
                     Some(*stake_map.get(&id).unwrap_or(&0))
                 }
             } else {
                 None
             },
-            jailed: if latest_height >= V2_ACTIVATION_HEIGHT {
+            jailed: if latest_height >= STAKING_ACTIVATION_HEIGHT {
                 Some(jailed.contains(&id))
             } else {
                 None
@@ -555,7 +555,7 @@ async fn get_staking(
     let latest_height = state.storage.get_latest_height().map_err(storage_err)?;
     let staking = state.storage.load_staking_state().map_err(storage_err)?;
 
-    let enabled = latest_height >= V2_ACTIVATION_HEIGHT;
+    let enabled = latest_height >= STAKING_ACTIVATION_HEIGHT;
     let stakes = staking
         .stakes
         .iter()
@@ -708,7 +708,7 @@ async fn submit_transaction(
     let next_height = latest_height.saturating_add(1);
     let version = ProtocolVersion::for_height(next_height);
 
-    if version == ProtocolVersion::V1 && tx.tx_type != TransactionType::Transfer {
+    if version == ProtocolVersion::Transfer && tx.tx_type != TransactionType::Transfer {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ApiError::new(
@@ -719,8 +719,8 @@ async fn submit_transaction(
     }
 
     let tx_bytes = match version {
-        ProtocolVersion::V1 => serialize_transaction_canonical_v1(&tx),
-        ProtocolVersion::V2 => serialize_transaction_canonical_v2(&tx),
+        ProtocolVersion::Transfer => serialize_transaction_canonical_v1(&tx),
+        ProtocolVersion::Staking => serialize_transaction_canonical_v2(&tx),
     };
     if tx_bytes.len() > state.max_tx_bytes {
         return Err((
@@ -803,7 +803,7 @@ async fn submit_transaction(
         ));
     }
 
-    if version == ProtocolVersion::V2
+    if version == ProtocolVersion::Staking
         && (tx.tx_type == TransactionType::Stake || tx.tx_type == TransactionType::Unstake)
     {
         let vid = ValidatorId(tx.sender.0);
@@ -830,8 +830,8 @@ async fn submit_transaction(
             let staking = state.storage.load_staking_state().map_err(storage_err)?;
 
             let effective_stake =
-                if next_height == axiom_primitives::V2_ACTIVATION_HEIGHT && staking.is_empty() {
-                    axiom_primitives::V2_MIGRATION_STAKE_PER_VALIDATOR
+                if next_height == axiom_primitives::STAKING_ACTIVATION_HEIGHT && staking.is_empty() {
+                    axiom_primitives::STAKING_MIGRATION_STAKE_PER_VALIDATOR
                 } else {
                     staking.stakes.get(&vid).map(|a| a.0).unwrap_or(0)
                 };

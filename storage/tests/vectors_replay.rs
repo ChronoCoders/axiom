@@ -128,7 +128,7 @@ fn create_and_sign_block(
         parent_hash,
         height,
         epoch: 0,
-        protocol_version: axiom_primitives::PROTOCOL_VERSION_V1,
+        protocol_version: axiom_primitives::PROTOCOL_VERSION_TRANSFER,
         round: 0,
         proposer_id,
         transactions: transactions.clone(),
