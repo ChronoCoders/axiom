@@ -3,103 +3,220 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>AXIOM Console</title>
+  <title>AXIOM &bull; Overview</title>
   <link rel="stylesheet" href="styles.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 </head>
-<body class="page-enter">
-  <header class="topbar">
-    <div class="brand">AXIOM <span class="pulse-dot" id="livePulse" title="Chain active"></span></div>
-    <nav class="nav">
-      <a href="index.html" class="active">Overview</a>
-      <a href="blocks.html">Blocks</a>
-      <a href="accounts.html">Accounts</a>
-      <a href="validators.html">Validators</a>
-    </nav>
-    <div class="search-wrapper">
-      <input type="text" id="globalSearch" class="search-input" placeholder="Search block height, hash, or account..." />
-      <div class="search-results" id="searchResults"></div>
+<body>
+<div class="shell">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+          <path d="M10 2L3 6.5v7L10 18l7-4.5v-7L10 2zm0 2.24L15.2 7.5v5L10 15.76 4.8 12.5v-5L10 4.24z"/>
+        </svg>
+      </div>
+      <div class="sidebar-wordmark">
+        AXIOM
+        <span>Operator Console</span>
+      </div>
     </div>
-    <button class="logout-btn" onclick="logout()">Logout</button>
-  </header>
 
-  <div id="toastContainer" class="toast-container"></div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Navigation</div>
+      <ul class="sidebar-nav">
+        <li><a href="index.html" class="active"><i class="fa-solid fa-gauge-high"></i> Overview</a></li>
+        <li><a href="blocks.html"><i class="fa-solid fa-cube"></i> Blocks</a></li>
+        <li><a href="accounts.html"><i class="fa-solid fa-wallet"></i> Accounts</a></li>
+        <li><a href="validators.html"><i class="fa-solid fa-shield-halved"></i> Validators</a></li>
+        <li><a href="staking.html"><i class="fa-solid fa-coins"></i> Staking</a></li>
+        <li><a href="tx.html"><i class="fa-solid fa-paper-plane"></i> Transactions</a></li>
+      </ul>
+    </div>
 
-  <main class="container">
-    <section class="section">
-      <h2 class="section-title">Network</h2>
-      <div class="grid">
-        <div><label>Genesis Hash</label><span class="value mono truncate" id="genesisHash"><span class="skeleton"></span></span></div>
-        <div><label>Height</label><span class="value mono" id="height"><span class="skeleton"></span></span></div>
-        <div><label>Validators</label><span class="value mono" id="validatorCount"><span class="skeleton"></span></span></div>
-        <div><label>Syncing</label><span class="value mono" id="syncing"><span class="skeleton"></span></span></div>
-        <div><label>Protocol</label><span class="value mono" id="protocolVersion"><span class="skeleton sk-sm"></span></span></div>
-        <div><label>Consensus</label><span class="value mono" id="consensusInfo"><span class="skeleton"></span></span></div>
+    <div class="sidebar-bottom">
+      <div class="sidebar-status">
+        <span class="pulse-dot" id="livePulse"></span>
+        <span class="sidebar-status-text" id="chainStatus">Connecting...</span>
+        <span class="sidebar-status-text" id="sidebarHeight" style="text-align:right;flex-shrink:0;"></span>
       </div>
-    </section>
+      <button class="sidebar-logout" onclick="logout()">
+        <i class="fa-solid fa-arrow-right-from-bracket"></i> Sign out
+      </button>
+    </div>
+  </aside>
 
-    <section class="section">
-      <h2 class="section-title">Latest Block</h2>
-      <div class="grid">
-        <div><label>Hash</label><span class="value mono truncate" id="latestHash"><span class="skeleton"></span></span></div>
-        <div><label>State Hash</label><span class="value mono truncate" id="latestStateHash"><span class="skeleton"></span></span></div>
-        <div><label>Proposer</label><span class="value mono truncate" id="latestProposer"><span class="skeleton"></span></span></div>
-        <div><label>Transactions</label><span class="value mono" id="latestTxCount"><span class="skeleton sk-sm"></span></span></div>
+  <!-- Mobile top bar -->
+  <div class="mobile-topbar">
+    <div class="sidebar-wordmark">AXIOM <span style="display:inline;font-size:9px;color:var(--text-3);">CONSOLE</span></div>
+    <button class="btn btn-ghost" style="font-size:12px;padding:5px 10px;" onclick="logout()">Sign out</button>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <!-- Mobile nav -->
+    <nav class="mobile-nav">
+      <a href="index.html" class="active"><i class="fa-solid fa-gauge-high"></i> Overview</a>
+      <a href="blocks.html"><i class="fa-solid fa-cube"></i> Blocks</a>
+      <a href="accounts.html"><i class="fa-solid fa-wallet"></i> Accounts</a>
+      <a href="validators.html"><i class="fa-solid fa-shield-halved"></i> Validators</a>
+      <a href="staking.html"><i class="fa-solid fa-coins"></i> Staking</a>
+      <a href="tx.html"><i class="fa-solid fa-paper-plane"></i> Transactions</a>
+    </nav>
+
+    <div class="page-header">
+      <div>
+        <div class="page-title">Overview</div>
+        <div class="page-subtitle">Chain status and recent activity</div>
       </div>
-    </section>
-
-    <section class="section">
-      <h2 class="section-title">Block Activity</h2>
-      <div class="grid">
-        <div><label>Tx / Block (last 20)</label><div id="sparkTx" class="sparkline-container"></div></div>
-        <div><label>Blocks / Interval</label><div id="sparkTime" class="sparkline-container"></div></div>
+      <div class="search-wrapper">
+        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+        <input type="text" id="globalSearch" class="search-input" placeholder="Block height, hash, account..."/>
+        <div class="search-results" id="searchResults"></div>
       </div>
-    </section>
+    </div>
 
-    <section class="section">
-      <h2 class="section-title">Peers</h2>
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Address</th>
-              <th>Connected Since</th>
-            </tr>
-          </thead>
-          <tbody id="peersTable"></tbody>
-        </table>
+    <div class="content">
+
+      <!-- Metrics -->
+      <div class="metrics">
+        <div class="metric-card">
+          <div class="metric-label"><i class="fa-solid fa-layer-group"></i>&nbsp; Height</div>
+          <div class="metric-value" id="ovHeight"><span class="skeleton sk-w-md"></span></div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label"><i class="fa-solid fa-shield-halved"></i>&nbsp; Validators</div>
+          <div class="metric-value" id="ovValidators"><span class="skeleton sk-w-sm"></span></div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label"><i class="fa-solid fa-code-branch"></i>&nbsp; Protocol</div>
+          <div class="metric-value" id="ovProtocol"><span class="skeleton sk-w-sm"></span></div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label"><i class="fa-solid fa-rotate"></i>&nbsp; Consensus</div>
+          <div class="metric-value sm" id="ovConsensus"><span class="skeleton sk-w-md"></span></div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label"><i class="fa-solid fa-arrows-rotate"></i>&nbsp; Syncing</div>
+          <div class="metric-value" id="ovSyncing"><span class="skeleton sk-w-sm"></span></div>
+        </div>
       </div>
-    </section>
 
-    <section class="section">
-      <h2 class="section-title">Validators</h2>
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Power</th>
-              <th>Stake</th>
-              <th>Account</th>
-              <th>Jailed</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody id="validatorsTable"></tbody>
-        </table>
+      <!-- Latest block + sparkline -->
+      <div style="display:grid;grid-template-columns:1fr 220px;gap:16px;">
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title"><i class="fa-solid fa-cube"></i>&nbsp; Latest Block</span>
+          </div>
+          <div class="card-body">
+            <div class="detail-grid">
+              <div class="detail-item">
+                <label>Hash</label>
+                <span class="detail-value truncate" id="ovLatestHash" data-tip=""><span class="skeleton sk-w-lg"></span></span>
+              </div>
+              <div class="detail-item">
+                <label>State Hash</label>
+                <span class="detail-value truncate" id="ovStateHash" data-tip=""><span class="skeleton sk-w-lg"></span></span>
+              </div>
+              <div class="detail-item">
+                <label>Proposer</label>
+                <span class="detail-value truncate" id="ovProposer" data-tip=""><span class="skeleton sk-w-md"></span></span>
+              </div>
+              <div class="detail-item">
+                <label>Transactions</label>
+                <span class="detail-value" id="ovTxCount"><span class="skeleton sk-w-sm"></span></span>
+              </div>
+              <div class="detail-item">
+                <label>Produced</label>
+                <span class="detail-value" id="ovTimestamp"><span class="skeleton sk-w-md"></span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div class="card" style="flex:1;">
+            <div class="card-header"><span class="card-title">Tx / Block</span></div>
+            <div class="card-body" style="display:flex;align-items:flex-end;height:72px;">
+              <div class="sparkline" id="sparkTx" style="width:100%;height:100%;"></div>
+            </div>
+          </div>
+          <div class="card" style="flex:1;">
+            <div class="card-header"><span class="card-title">Health</span></div>
+            <div class="card-body" style="display:flex;flex-direction:column;gap:10px;">
+              <div class="health-row">
+                <div class="health-dot" id="healthLiveDot"></div>
+                <span class="health-label" id="healthLiveLabel">Checking...</span>
+              </div>
+              <div class="health-row">
+                <div class="health-dot" id="healthReadyDot"></div>
+                <span class="health-label" id="healthReadyLabel">Checking...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
-    </section>
 
-    <section class="section">
-      <h2 class="section-title">Health</h2>
-      <div class="grid">
-        <div><label>Liveness</label><span class="value" id="healthLive"><span class="status-dot"></span><span class="health-text">-</span></span></div>
-        <div><label>Readiness</label><span class="value" id="healthReady"><span class="status-dot"></span><span class="health-text">-</span></span></div>
+      <!-- Recent blocks -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title"><i class="fa-solid fa-list"></i>&nbsp; Recent Blocks</span>
+          <a href="blocks.html" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">View all</a>
+        </div>
+        <div class="card-body no-pad">
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Height</th>
+                  <th>Hash</th>
+                  <th>Proposer</th>
+                  <th>Txs</th>
+                  <th>Time</th>
+                </tr>
+              </thead>
+              <tbody id="recentBlocksTable">
+                <tr><td colspan="5" class="table-empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
-    </section>
-  </main>
 
-  <footer class="footer">AXIOM Console &middot; Read-only</footer>
-  <div class="tooltip" id="tooltip"></div>
-  <script src="app.js"></script>
+      <!-- Peers -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title"><i class="fa-solid fa-network-wired"></i>&nbsp; Connected Peers</span>
+        </div>
+        <div class="card-body no-pad">
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Address</th>
+                  <th>Connected</th>
+                </tr>
+              </thead>
+              <tbody id="peersTable">
+                <tr><td colspan="2" class="table-empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+
+    <div class="page-footer">AXIOM Console &middot; Read-only</div>
+  </div><!-- /main -->
+</div><!-- /shell -->
+
+<div id="toastContainer" class="toast-container"></div>
+<div id="tooltip" class="tooltip"></div>
+<script src="app.js"></script>
 </body>
 </html>

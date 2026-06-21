@@ -57,7 +57,7 @@ for ($i = 1; $i -le 4; $i++) {
 
 # 6. Setup Nodes
 $Nodes = 1..4
-$BaseP2P = 3000
+$BaseP2P = 13000
 $BaseAPI = 8080
 
 foreach ($i in $Nodes) {
