@@ -13,17 +13,22 @@ use axum::{
     error_handling::HandleErrorLayer,
     extract::{DefaultBodyLimit, Path, Query, State},
     http::StatusCode,
-    response::{IntoResponse, Json},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse, Json,
+    },
     routing::{get, post},
     BoxError, Router,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
+use tokio_stream::wrappers::BroadcastStream;
 use tower::buffer::BufferLayer;
 use tower::limit::RateLimitLayer;
 use tower::load_shed::LoadShedLayer;
@@ -51,6 +56,15 @@ pub struct AppState {
     pub console_pass: String,
     /// Maximum size of a single transaction in canonical bytes.
     pub max_tx_bytes: usize,
+    /// Broadcast sender for block commit events; subscribers receive (height, hash).
+    pub block_tx: broadcast::Sender<(u64, String)>,
+}
+
+impl AppState {
+    /// Returns a clone of the block event broadcast sender.
+    pub fn block_sender(&self) -> broadcast::Sender<(u64, String)> {
+        self.block_tx.clone()
+    }
 }
 
 async fn handle_error(error: BoxError) -> (StatusCode, String) {
@@ -172,6 +186,30 @@ async fn auth_logout(
     let now = Instant::now();
     tokens.retain(|_, exp| *exp > now);
     Json(AuthLogoutResponse { ok: true })
+}
+
+async fn sse_events_handler(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    use tokio_stream::StreamExt as _;
+    let rx = state.block_tx.subscribe();
+    let stream = BroadcastStream::new(rx).filter_map(|result| match result {
+        Ok((height, hash)) => {
+            let data = format!(r#"{{"height":{},"hash":"{}"}}"#, height, hash);
+            Some(Ok::<_, Infallible>(
+                Event::default().event("block").data(data),
+            ))
+        }
+        Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
+            tracing::warn!("SSE client lagged, skipped {} events", n);
+            None
+        }
+    });
+    Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("ping"),
+    )
 }
 
 /// Converts a storage error into an HTTP 500 ApiError response.
@@ -906,6 +944,7 @@ pub fn app_router(state: Arc<AppState>, web_dir: PathBuf) -> Router {
     Router::new()
         .route("/health/live", get(health_live))
         .route("/health/ready", get(health_ready))
+        .route("/events", get(sse_events_handler))
         .route("/auth/login", post(auth_login))
         .route("/auth/verify", post(auth_verify))
         .route("/auth/logout", post(auth_logout))
