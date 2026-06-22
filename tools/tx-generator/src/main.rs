@@ -291,6 +291,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let interval = Duration::from_secs_f64(1.0 / args.tps);
 
+    info!(tps = args.tps, interval_ms = interval.as_millis(), "generator ready");
+
     let mut i: usize = 0;
     loop {
         if i > 0 && i % HEIGHT_REFRESH_EVERY == 0 {
