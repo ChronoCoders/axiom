@@ -1173,6 +1173,14 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                             if storage.commit_block_v2(&block, &new_state, &new_staking).is_ok() {
                                                 *state_guard = new_state;
                                                 *staking_guard = new_staking;
+                                                let tx_hashes: Vec<_> = block
+                                                    .transactions
+                                                    .iter()
+                                                    .map(|tx| axiom_crypto::compute_transaction_hash_for_height(block.height, tx))
+                                                    .collect();
+                                                if let Ok(mut mempool_guard) = mempool.lock() {
+                                                    mempool_guard.remove_batch(&tx_hashes);
+                                                }
                                                 current_height.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                                                 let _ = block_sender.send((block.height, hex::encode(compute_block_hash(&block).0)));
                                                 bft_engine = None;
