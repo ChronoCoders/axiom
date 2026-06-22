@@ -100,6 +100,7 @@ pub fn construct_block(
     block.signatures.push(ValidatorSignature {
         validator_id: *proposer_id,
         signature,
+        round: 0,
     });
 
     Ok(block)
@@ -345,6 +346,7 @@ mod tests {
         block.signatures.push(ValidatorSignature {
             validator_id: *val2_id,
             signature: sig2,
+            round: 0,
         });
 
         let res = validate_and_commit_block(&state, &staking, &block, &parent_hash, 0);
@@ -365,6 +367,7 @@ mod tests {
         block.signatures.push(ValidatorSignature {
             validator_id: *val3_id,
             signature: sig3,
+            round: 0,
         });
 
         validate_and_commit_block(&state, &staking, &block, &parent_hash, 0)
@@ -389,6 +392,7 @@ mod tests {
         block.signatures.push(ValidatorSignature {
             validator_id: unknown_id,
             signature: sig,
+            round: 0,
         });
 
         let res = validate_and_commit_block(&state, &staking, &block, &parent_hash, 0);

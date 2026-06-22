@@ -170,6 +170,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         block1.signatures.push(ValidatorSignature {
             validator_id: *vid,
             signature: sig,
+            round: 0,
         });
         let num = orig_idx + 1;
         let sig_prefix = &to_hex(&sig.0)[..32];
