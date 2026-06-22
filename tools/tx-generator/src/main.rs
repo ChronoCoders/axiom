@@ -15,9 +15,18 @@ const HEIGHT_REFRESH_EVERY: usize = 50;
 #[derive(Parser)]
 #[command(name = "tx-generator")]
 struct Args {
-    /// Base URL of the node API
-    #[arg(long, default_value = "http://127.0.0.1:8081")]
-    api_url: String,
+    /// Node API URLs — each transaction is broadcast to all of them
+    #[arg(
+        long = "api-url",
+        num_args = 1..,
+        default_values = [
+            "http://127.0.0.1:8081",
+            "http://127.0.0.1:8082",
+            "http://127.0.0.1:8083",
+            "http://127.0.0.1:8084",
+        ]
+    )]
+    api_urls: Vec<String>,
 
     /// Target transactions per second
     #[arg(long, default_value_t = 2.0)]
@@ -39,6 +48,11 @@ struct Args {
 struct Account {
     signing_key: SigningKey,
     account_id: AccountId,
+}
+
+struct NodeState {
+    url: String,
+    token: String,
 }
 
 #[derive(Serialize)]
@@ -126,7 +140,6 @@ async fn do_login(
         return Err(format!("login failed ({status}): {body}").into());
     }
     let body: LoginResponse = resp.json().await?;
-    info!("logged in");
     Ok(body.token)
 }
 
@@ -203,56 +216,53 @@ fn build_tx(sender: &Account, recipient_id: AccountId, nonce: u64, next_height: 
     Transaction { signature: sig, ..tx }
 }
 
-async fn try_submit(
+/// Submit to one node; re-login on 401. Returns the tx hash if accepted.
+async fn submit_to_node(
     client: &reqwest::Client,
-    api_url: &str,
-    token: &mut String,
+    node: &mut NodeState,
     username: &str,
     password: &str,
     tx: &Transaction,
-    nonces: &mut [u64],
-    sender_idx: usize,
-    nonce: u64,
-) {
-    let outcome = match submit(client, api_url, token, tx).await {
+) -> Option<String> {
+    let outcome = match submit(client, &node.url, &node.token, tx).await {
         Ok(o) => o,
         Err(e) => {
-            error!(err = %e, "network error submitting tx");
-            return;
+            warn!(url = %node.url, err = %e, "network error submitting tx");
+            return None;
         }
     };
-
     match outcome {
-        SubmitOutcome::Accepted(hash) => {
-            info!(tx_hash = %hash, nonce, sender_idx, "tx accepted");
-            nonces[sender_idx] = nonce.saturating_add(1);
-        }
+        SubmitOutcome::Accepted(hash) => Some(hash),
         SubmitOutcome::Unauthorized => {
-            warn!("401 received, re-logging in");
-            match do_login(client, api_url, username, password).await {
-                Ok(new_token) => {
-                    *token = new_token;
-                    match submit(client, api_url, token, tx).await {
-                        Ok(SubmitOutcome::Accepted(hash)) => {
-                            info!(tx_hash = %hash, nonce, "tx accepted after re-login");
-                            nonces[sender_idx] = nonce.saturating_add(1);
-                        }
+            warn!(url = %node.url, "401, re-logging in");
+            match do_login(client, &node.url, username, password).await {
+                Ok(t) => {
+                    node.token = t;
+                    match submit(client, &node.url, &node.token, tx).await {
+                        Ok(SubmitOutcome::Accepted(hash)) => Some(hash),
                         Ok(SubmitOutcome::Unauthorized) => {
-                            error!("still 401 after re-login");
+                            error!(url = %node.url, "still 401 after re-login");
+                            None
                         }
                         Ok(SubmitOutcome::Rejected(msg)) => {
-                            error!(err = %msg, nonce, "tx rejected after re-login");
+                            error!(url = %node.url, err = %msg, "tx rejected after re-login");
+                            None
                         }
                         Err(e) => {
-                            error!(err = %e, "network error on retry after re-login");
+                            error!(url = %node.url, err = %e, "network error after re-login");
+                            None
                         }
                     }
                 }
-                Err(e) => error!(err = %e, "re-login failed"),
+                Err(e) => {
+                    error!(url = %node.url, err = %e, "re-login failed");
+                    None
+                }
             }
         }
         SubmitOutcome::Rejected(msg) => {
-            error!(err = %msg, nonce, sender_idx, "tx rejected");
+            error!(url = %node.url, err = %msg, "tx rejected");
+            None
         }
     }
 }
@@ -277,26 +287,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(n, "accounts loaded");
 
     let client = reqwest::Client::new();
-    let mut token = do_login(&client, &args.api_url, &args.username, &args.password).await?;
+
+    let mut nodes: Vec<NodeState> = Vec::new();
+    for url in &args.api_urls {
+        match do_login(&client, url, &args.username, &args.password).await {
+            Ok(token) => {
+                info!(url, "logged in");
+                nodes.push(NodeState { url: url.clone(), token });
+            }
+            Err(e) => {
+                warn!(url, err = %e, "login failed, skipping node");
+            }
+        }
+    }
+    if nodes.is_empty() {
+        return Err("failed to login to any node".into());
+    }
 
     let mut nonces: Vec<u64> = Vec::with_capacity(n);
     for acc in &accounts {
-        let nonce = fetch_nonce(&client, &args.api_url, &acc.account_id, &token).await?;
+        let nonce =
+            fetch_nonce(&client, &nodes[0].url, &acc.account_id, &nodes[0].token).await?;
         info!(account_id = %acc.account_id, nonce, "nonce fetched");
         nonces.push(nonce);
     }
 
-    let mut height = fetch_height(&client, &args.api_url, &token).await?;
+    let mut height = fetch_height(&client, &nodes[0].url, &nodes[0].token).await?;
     info!(height, "initial chain height");
 
     let interval = Duration::from_secs_f64(1.0 / args.tps);
 
-    info!(tps = args.tps, interval_ms = interval.as_millis(), "generator ready");
+    info!(
+        tps = args.tps,
+        interval_ms = interval.as_millis(),
+        nodes = nodes.len(),
+        "generator ready"
+    );
 
     let mut i: usize = 0;
     loop {
         if i > 0 && i % HEIGHT_REFRESH_EVERY == 0 {
-            match fetch_height(&client, &args.api_url, &token).await {
+            let url = nodes[0].url.clone();
+            let token = nodes[0].token.clone();
+            match fetch_height(&client, &url, &token).await {
                 Ok(h) => {
                     height = h;
                     info!(height, "refreshed chain height");
@@ -313,18 +346,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let tx = build_tx(&accounts[sender_idx], recipient_id, nonce, next_height);
 
-        try_submit(
-            &client,
-            &args.api_url,
-            &mut token,
-            &args.username,
-            &args.password,
-            &tx,
-            &mut nonces,
-            sender_idx,
-            nonce,
-        )
-        .await;
+        let mut first_hash: Option<String> = None;
+        for node in &mut nodes {
+            if let Some(hash) =
+                submit_to_node(&client, node, &args.username, &args.password, &tx).await
+            {
+                if first_hash.is_none() {
+                    first_hash = Some(hash);
+                }
+            }
+        }
+
+        if let Some(hash) = first_hash {
+            info!(tx_hash = %hash, nonce, sender_idx, "tx accepted");
+            nonces[sender_idx] = nonce.saturating_add(1);
+        } else {
+            warn!(nonce, sender_idx, "tx not accepted by any node");
+        }
 
         i += 1;
         tokio::time::sleep(interval).await;

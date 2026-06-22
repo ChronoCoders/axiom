@@ -151,6 +151,7 @@ fn create_and_sign_block(
         block.signatures.push(ValidatorSignature {
             validator_id: *vid,
             signature: sig,
+            round: 0,
         });
     }
 

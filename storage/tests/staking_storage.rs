@@ -83,6 +83,7 @@ fn test_staking_state_storage_roundtrip() {
         signatures: vec![ValidatorSignature {
             validator_id: val_id,
             signature: Signature([0u8; 64]),
+            round: 0,
         }],
         state_hash: StateHash([0xaa; 32]),
         timestamp: 0,

@@ -517,6 +517,9 @@ fn default_protocol_version() -> u64 {
 pub struct ValidatorSignature {
     pub validator_id: ValidatorId,
     pub signature: Signature,
+    /// BFT round at which this precommit was cast. Zero for Transfer-protocol signatures.
+    #[serde(default)]
+    pub round: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

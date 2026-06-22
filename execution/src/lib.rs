@@ -1118,13 +1118,14 @@ fn verify_quorum_v2(
             &sig.validator_id,
             &block_hash,
             block.height,
-            block.round,
+            sig.round,
             &sig.signature,
         );
         if let Err(ref e) = precommit_result {
             tracing::warn!(
                 height = block.height,
-                round = block.round,
+                block_round = block.round,
+                commit_round = sig.round,
                 protocol_version = block.protocol_version,
                 epoch = block.epoch,
                 block_hash = to_hex(&block_hash.0),
@@ -1299,6 +1300,7 @@ mod tests {
         block.signatures.push(axiom_primitives::ValidatorSignature {
             validator_id: *val_id,
             signature: sig,
+            round: 0,
         });
     }
 
@@ -1807,6 +1809,7 @@ mod tests {
             axiom_primitives::ValidatorSignature {
                 validator_id: val_id,
                 signature: Signature([0u8; 64]),
+                round: 0,
             };
             20_000
         ];

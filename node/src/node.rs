@@ -436,6 +436,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                         let sig_struct = ValidatorSignature {
                                             validator_id: *val_id,
                                             signature,
+                                            round: 0,
                                         };
 
                                         vote_pool
@@ -1767,6 +1768,7 @@ pub async fn start(config: AppConfig, mut shutdown_rx: tokio::sync::broadcast::R
                                 let sig_struct = ValidatorSignature {
                                     validator_id: *val_id,
                                     signature: final_sig,
+                                    round: 0,
                                 };
                                 let vote_msg = NetworkMessage::Vote(sig_struct.clone(), block_hash, block.height);
                                 let net_tx_clone = net_tx.clone();

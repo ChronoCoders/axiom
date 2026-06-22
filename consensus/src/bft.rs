@@ -380,6 +380,7 @@ impl Engine {
                                 .map(|v| ValidatorSignature {
                                     validator_id: v.validator_id,
                                     signature: v.signature,
+                                    round: v.round,
                                 })
                                 .collect();
                             outs.push(Outbound::CommittedBlock(committed));

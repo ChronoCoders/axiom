@@ -42,6 +42,7 @@ fn dummy_vote() -> NetworkMessage {
         ValidatorSignature {
             validator_id: ValidatorId([6; 32]),
             signature: Signature([7; 64]),
+            round: 0,
         },
         BlockHash([8; 32]),
         10,
