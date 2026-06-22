@@ -46,10 +46,10 @@ New-Item -ItemType Directory -Force -Path $TestnetDir | Out-Null
 Copy-Item "$Root/fixtures/reference_genesis.json" "$TestnetDir/genesis.json"
 
 $ValidatorSecrets = @(
-    "eed1444f431a29ddaba560d09559f7b3453cc1def5861ab51bcd3344dae18834",
-    "9bd3bf36c5da99993f250e5b2e558e6768583ed5bbbd24a39560fca381b3c369",
-    "2a8e0ea62396cbe5821e10a3700ee4da1a96eea2bed02c6f28d16591e682e3cb",
-    "139a29f05f0426440423e577fe65810d96d8dd4418f4f4d2226b04f2b5a40712"
+    "61864c755c13af4bbed639740e37c957562682ae6d4b734e2fc4e51e1d9b45cc",
+    "487108a4a56afdac12740bd20b2e9932aff5e8b85988dd15b0cebd53b3f2401c",
+    "42074f160e543917a985c8b52fcdc7590481ff9f6926fc6843263e2cf39e060b",
+    "1b8e7559a62e4c39bbbb03d0920d0a48e97c72c83ecd65e33d6e414dbb46447d"
 )
 for ($i = 1; $i -le 4; $i++) {
     $ValidatorSecrets[$i - 1] | Set-Content -NoNewline -Path "$TestnetDir/validator_$i.secret"
