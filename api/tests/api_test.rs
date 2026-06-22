@@ -12,7 +12,7 @@ use axum::{
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use tower::Service;
 use tower::ServiceExt;
 
@@ -44,6 +44,7 @@ async fn setup_app() -> (
     let mempool_arc = Arc::new(Mutex::new(mempool));
     let storage_arc = Arc::new(storage);
 
+    let (block_tx, _) = broadcast::channel(16);
     let app_state = Arc::new(AppState {
         storage: storage_arc.clone(),
         mempool: mempool_arc.clone(),
@@ -52,6 +53,7 @@ async fn setup_app() -> (
         console_user: "operator".to_string(),
         console_pass: "axiom".to_string(),
         max_tx_bytes: 65536,
+        block_tx,
     });
 
     (
