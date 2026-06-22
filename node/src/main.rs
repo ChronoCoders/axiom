@@ -11,7 +11,7 @@ use axiom_node::genesis::load_genesis_state;
 use axiom_node::node;
 
 const LOCKED_GENESIS_HASH: &str =
-    "c1b50f23e410fe99b7ec6e304165b18f1dfe723ad5417133a12cdf8517460761";
+    "3fb12276f3ba92c5c3ad3d59eb6c2d1585540114da5922906cedcf44b245ba86";
 
 async fn shutdown_signal() {
     let ctrl_c = async {
