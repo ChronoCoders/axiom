@@ -8,6 +8,7 @@ axiom-primitives = { path = "../primitives" }
 axiom-crypto = { path = "../crypto" }
 axiom-state = { path = "../state" }
 thiserror = "1.0"
+tracing = "0.1"
 
 [dev-dependencies]
 rand = "0.8"

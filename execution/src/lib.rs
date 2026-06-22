@@ -6,8 +6,8 @@ use axiom_crypto::{
     CryptoError,
 };
 use axiom_primitives::{
-    serialize_block_canonical, serialize_evidence_canonical, AccountId, Block, BlockHash, Evidence,
-    ProtocolVersion, StakeAmount, StateHash, Transaction, TransactionType, ValidatorId,
+    serialize_block_canonical, serialize_evidence_canonical, to_hex, AccountId, Block, BlockHash,
+    Evidence, ProtocolVersion, StakeAmount, StateHash, Transaction, TransactionType, ValidatorId,
     MAX_BLOCK_SIZE_BYTES, MAX_TRANSACTIONS_PER_BLOCK, SLASH_PERCENTAGE, STAKING_ACTIVATION_HEIGHT,
     STAKING_MIGRATION_STAKE_PER_VALIDATOR,
 };
@@ -1093,6 +1093,7 @@ fn verify_quorum_v2(
     let mut seen_validators = HashSet::new();
     let block_hash = compute_block_hash(block);
 
+
     for sig in &block.signatures {
         if !seen_validators.insert(&sig.validator_id) {
             return Err(ExecutionError::DuplicateSignature {
@@ -1113,13 +1114,26 @@ fn verify_quorum_v2(
             });
         }
 
-        verify_precommit(
+        let precommit_result = verify_precommit(
             &sig.validator_id,
             &block_hash,
             block.height,
             block.round,
             &sig.signature,
-        )?;
+        );
+        if let Err(ref e) = precommit_result {
+            tracing::warn!(
+                height = block.height,
+                round = block.round,
+                protocol_version = block.protocol_version,
+                epoch = block.epoch,
+                block_hash = to_hex(&block_hash.0),
+                validator_id = to_hex(&sig.validator_id.0),
+                sig = to_hex(&sig.signature.0),
+                "verify_quorum_v2: precommit sig failed: {e}"
+            );
+        }
+        precommit_result?;
 
         collected_stake = collected_stake
             .checked_add(
